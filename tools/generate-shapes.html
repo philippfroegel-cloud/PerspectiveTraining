@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Shape PNG Generator</title>
+  <style>
+    body { font-family: sans-serif; background: #1f2937; color: #f9fafb; padding: 2rem; }
+    h1   { color: #fbbf24; }
+    .grid { display: flex; flex-wrap: wrap; gap: 1.5rem; margin-top: 1.5rem; }
+    .card {
+      background: #374151; border-radius: 10px; padding: 1rem;
+      display: flex; flex-direction: column; align-items: center; gap: 0.5rem;
+      width: 180px;
+    }
+    canvas { background: repeating-conic-gradient(#555 0% 25%, #888 0% 50%) 0 0 / 16px 16px; border-radius: 4px; }
+    button {
+      background: #fbbf24; color: #111; border: none; border-radius: 6px;
+      padding: 0.4rem 1rem; cursor: pointer; font-weight: bold; font-size: 0.85rem;
+    }
+    button:hover { background: #f59e0b; }
+    p.hint { color: #9ca3af; font-size: 0.8rem; margin: 0; }
+  </style>
+</head>
+<body>
+  <h1>Shape PNG Generator</h1>
+  <p>Each shape is drawn as a black outline on a <strong>transparent background</strong>.<br>
+     Click <strong>Download</strong> and save the file to <code>public/shapes/</code>.</p>
+  <div class="grid" id="grid"></div>
+
+<script>
+const SIZE   = 512
+const STROKE = 14   // outline thickness in pixels
+
+// ── Shape drawing functions ──────────────────────────────────────────────────
+// Each function receives a CanvasRenderingContext2D sized SIZE×SIZE.
+// They should only stroke(), never fill().
+
+const shapes = [
+  {
+    id: 'heart',
+    draw(ctx) {
+      const cx = SIZE / 2, cy = SIZE / 2
+      const s  = SIZE * 0.38
+      ctx.beginPath()
+      ctx.moveTo(cx, cy + s * 0.9)
+      ctx.bezierCurveTo(cx - s * 1.6, cy - s * 0.1,  cx - s * 2.1, cy - s * 1.3, cx, cy - s * 0.5)
+      ctx.bezierCurveTo(cx + s * 2.1, cy - s * 1.3,  cx + s * 1.6, cy - s * 0.1, cx, cy + s * 0.9)
+      ctx.closePath()
+      ctx.stroke()
+    },
+  },
+  {
+    id: 'guitar',
+    draw(ctx) {
+      const cx = SIZE / 2
+      // lower body
+      ellipseStroke(ctx, cx, SIZE * 0.68, SIZE * 0.28, SIZE * 0.22)
+      // upper body (smaller)
+      ellipseStroke(ctx, cx, SIZE * 0.40, SIZE * 0.19, SIZE * 0.16)
+      // neck
+      ctx.beginPath()
+      ctx.rect(cx - SIZE * 0.045, SIZE * 0.13, SIZE * 0.09, SIZE * 0.29)
+      ctx.stroke()
+      // headstock
+      ctx.beginPath()
+      ctx.roundRect(cx - SIZE * 0.075, SIZE * 0.05, SIZE * 0.15, SIZE * 0.10, 4)
+      ctx.stroke()
+      // waist connecting lines
+      ctx.beginPath()
+      ctx.moveTo(cx - SIZE * 0.19, SIZE * 0.48)
+      ctx.lineTo(cx - SIZE * 0.28, SIZE * 0.56)
+      ctx.moveTo(cx + SIZE * 0.19, SIZE * 0.48)
+      ctx.lineTo(cx + SIZE * 0.28, SIZE * 0.56)
+      ctx.stroke()
+    },
+  },
+  {
+    id: 'bottle',
+    draw(ctx) {
+      const cx = SIZE / 2
+      ctx.beginPath()
+      // left side: cap → neck → shoulder → body
+      ctx.moveTo(cx - SIZE * 0.08, SIZE * 0.05)
+      ctx.lineTo(cx - SIZE * 0.08, SIZE * 0.22)
+      ctx.bezierCurveTo(cx - SIZE * 0.08, SIZE * 0.30, cx - SIZE * 0.26, SIZE * 0.36, cx - SIZE * 0.26, SIZE * 0.50)
+      ctx.lineTo(cx - SIZE * 0.26, SIZE * 0.88)
+      // bottom
+      ctx.lineTo(cx + SIZE * 0.26, SIZE * 0.88)
+      // right side
+      ctx.lineTo(cx + SIZE * 0.26, SIZE * 0.50)
+      ctx.bezierCurveTo(cx + SIZE * 0.26, SIZE * 0.36, cx + SIZE * 0.08, SIZE * 0.30, cx + SIZE * 0.08, SIZE * 0.22)
+      ctx.lineTo(cx + SIZE * 0.08, SIZE * 0.05)
+      ctx.closePath()
+      ctx.stroke()
+      // cap top line
+      ctx.beginPath()
+      ctx.moveTo(cx - SIZE * 0.08, SIZE * 0.05)
+      ctx.lineTo(cx + SIZE * 0.08, SIZE * 0.05)
+      ctx.stroke()
+    },
+  },
+  {
+    id: 'arrow',
+    draw(ctx) {
+      const y1 = SIZE * 0.38, y2 = SIZE * 0.62
+      const xTail = SIZE * 0.08, xShaft = SIZE * 0.60
+      const xTip = SIZE * 0.92, yMid = SIZE / 2
+      const yHead1 = SIZE * 0.22, yHead2 = SIZE * 0.78
+      ctx.beginPath()
+      ctx.moveTo(xTail,  y1)
+      ctx.lineTo(xShaft, y1)
+      ctx.lineTo(xShaft, yHead1)
+      ctx.lineTo(xTip,   yMid)
+      ctx.lineTo(xShaft, yHead2)
+      ctx.lineTo(xShaft, y2)
+      ctx.lineTo(xTail,  y2)
+      ctx.closePath()
+      ctx.stroke()
+    },
+  },
+  {
+    id: 'star',
+    draw(ctx) {
+      const cx = SIZE / 2, cy = SIZE / 2
+      const outer = SIZE * 0.43, inner = SIZE * 0.18
+      ctx.beginPath()
+      for (let i = 0; i < 5; i++) {
+        const outerAngle = (Math.PI * 2 * i) / 5 - Math.PI / 2
+        const innerAngle = outerAngle + Math.PI / 5
+        if (i === 0) ctx.moveTo(cx + outer * Math.cos(outerAngle), cy + outer * Math.sin(outerAngle))
+        else         ctx.lineTo(cx + outer * Math.cos(outerAngle), cy + outer * Math.sin(outerAngle))
+        ctx.lineTo(cx + inner * Math.cos(innerAngle), cy + inner * Math.sin(innerAngle))
+      }
+      ctx.closePath()
+      ctx.stroke()
+    },
+  },
+  {
+    id: 'house',
+    draw(ctx) {
+      const cx = SIZE / 2
+      // walls
+      ctx.beginPath()
+      ctx.rect(SIZE * 0.15, SIZE * 0.48, SIZE * 0.70, SIZE * 0.44)
+      ctx.stroke()
+      // roof
+      ctx.beginPath()
+      ctx.moveTo(SIZE * 0.05, SIZE * 0.52)
+      ctx.lineTo(cx,          SIZE * 0.08)
+      ctx.lineTo(SIZE * 0.95, SIZE * 0.52)
+      ctx.stroke()
+      // door
+      ctx.beginPath()
+      ctx.rect(cx - SIZE * 0.09, SIZE * 0.70, SIZE * 0.18, SIZE * 0.22)
+      ctx.stroke()
+    },
+  },
+  {
+    id: 'fish',
+    draw(ctx) {
+      const cx = SIZE * 0.52, cy = SIZE / 2
+      // body ellipse
+      ellipseStroke(ctx, cx, cy, SIZE * 0.30, SIZE * 0.18)
+      // tail
+      ctx.beginPath()
+      ctx.moveTo(SIZE * 0.22, cy)
+      ctx.lineTo(SIZE * 0.06, cy - SIZE * 0.18)
+      ctx.lineTo(SIZE * 0.06, cy + SIZE * 0.18)
+      ctx.closePath()
+      ctx.stroke()
+      // eye
+      ctx.beginPath()
+      ctx.arc(SIZE * 0.68, cy - SIZE * 0.04, SIZE * 0.025, 0, Math.PI * 2)
+      ctx.stroke()
+    },
+  },
+  {
+    id: 'tree',
+    draw(ctx) {
+      const cx = SIZE / 2
+      // trunk
+      ctx.beginPath()
+      ctx.rect(cx - SIZE * 0.07, SIZE * 0.68, SIZE * 0.14, SIZE * 0.26)
+      ctx.stroke()
+      // bottom triangle
+      ctx.beginPath()
+      ctx.moveTo(SIZE * 0.10, SIZE * 0.72)
+      ctx.lineTo(cx,          SIZE * 0.35)
+      ctx.lineTo(SIZE * 0.90, SIZE * 0.72)
+      ctx.closePath()
+      ctx.stroke()
+      // top triangle
+      ctx.beginPath()
+      ctx.moveTo(SIZE * 0.20, SIZE * 0.52)
+      ctx.lineTo(cx,          SIZE * 0.08)
+      ctx.lineTo(SIZE * 0.80, SIZE * 0.52)
+      ctx.closePath()
+      ctx.stroke()
+    },
+  },
+]
+
+function ellipseStroke(ctx, cx, cy, rx, ry) {
+  ctx.beginPath()
+  ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2)
+  ctx.stroke()
+}
+
+// ── Render all shapes ────────────────────────────────────────────────────────
+const grid = document.getElementById('grid')
+
+shapes.forEach(shape => {
+  const canvas = document.createElement('canvas')
+  canvas.width  = SIZE
+  canvas.height = SIZE
+  canvas.style.width  = '140px'
+  canvas.style.height = '140px'
+
+  const ctx = canvas.getContext('2d')
+  ctx.clearRect(0, 0, SIZE, SIZE)   // fully transparent
+  ctx.strokeStyle = '#000000'
+  ctx.lineWidth   = STROKE
+  ctx.lineJoin    = 'round'
+  ctx.lineCap     = 'round'
+  shape.draw(ctx)
+
+  const btn = document.createElement('button')
+  btn.textContent = 'Download'
+  btn.onclick = () => {
+    const a = document.createElement('a')
+    a.download = shape.id + '.png'
+    a.href = canvas.toDataURL('image/png')
+    a.click()
+  }
+
+  const card = document.createElement('div')
+  card.className = 'card'
+  card.innerHTML = `<strong>${shape.id}.png</strong>`
+  card.appendChild(canvas)
+  card.appendChild(btn)
+  grid.appendChild(card)
+})
+</script>
+</body>
+</html>

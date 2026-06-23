@@ -1,0 +1,55 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Global resets ─────────────────────────────────────────── */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  background-color: #f9fafb;
+  color: #111827;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+}
+
+.print-only {
+  display: none;
+}
+
+/* ── Print styles ──────────────────────────────────────────── */
+@media print {
+  .no-print {
+    display: none !important;
+  }
+
+  body {
+    background: white !important;
+    color: black !important;
+  }
+
+  .print-perspective-host {
+    position: fixed !important;
+    inset: 0 !important;
+    width: 100vw !important;
+    height: 100vh !important;
+    border: none !important;
+    border-radius: 0 !important;
+    background: white !important;
+  }
+
+  #print-area {
+    display: none !important;
+  }
+
+  .print-only.perspective-print-image {
+    display: block !important;
+    width: 100vw;
+    height: 100vh;
+    object-fit: contain;
+    background: white;
+  }
+}
