@@ -40,7 +40,16 @@ export function getPerspectiveParams(seed: number, aspectRatio: number): Perspec
   const elevationSign = rand() < 0.5 ? -1 : 1
   const elevationRad = elevationSign * elevationMagnitudeDeg * (Math.PI / 180)
   const rollRad = rand() * Math.PI * 2
-  const fov = 42 + rand() * 20 // 42..62
+
+  // Angle-conditioned FOV:
+  // - edge-on-ish views keep narrower FOV (less distortion)
+  // - face-on-ish views may use much wider FOV (up to ~120)
+  // Plane normal is +Z and camera direction toward origin has z component sin(az)*cos(el).
+  const facingScore = Math.abs(Math.sin(azimuthRad) * Math.cos(elevationRad)) // 0..1
+  const easedFacing = Math.pow(facingScore, 1.6)
+  const fovMin = 42
+  const fovMax = 58 + 62 * easedFacing // 58..120 depending on orientation
+  const fov = fovMin + rand() * (fovMax - fovMin)
 
   // Keep slight size variation while avoiding clipping.
   const framingPadding = 1.04 + rand() * 0.16 // 1.04..1.20

@@ -17,6 +17,7 @@ export default function DrawingCanvas({ enabled, width, height, clearTrigger, on
   const ctxRef = useRef<CanvasRenderingContext2D | null>(null)
   const drawingRef = useRef(false)
   const [eraserMode, setEraserMode] = useState(false)
+  const [hasDrawn, setHasDrawn] = useState(false)
 
   const PEN_SIZE = 3
   const ERASER_SIZE = 20
@@ -81,6 +82,7 @@ export default function DrawingCanvas({ enabled, width, height, clearTrigger, on
     if (!enabled) return
     const ctx = ctxRef.current
     if (!ctx) return
+    if (!hasDrawn) setHasDrawn(true)
     const point = toCanvasPoint(event)
     applyBrushStyle()
     ctx.beginPath()
@@ -117,6 +119,7 @@ export default function DrawingCanvas({ enabled, width, height, clearTrigger, on
   useEffect(() => {
     clearCanvas()
     setEraserMode(false)
+    setHasDrawn(false)
   }, [clearTrigger])
 
   return (
@@ -151,7 +154,7 @@ export default function DrawingCanvas({ enabled, width, height, clearTrigger, on
           </button>
           <button
             onClick={clearCanvas}
-            className="px-3 py-1 rounded bg-red-100 border border-red-300 text-red-700 text-sm hover:bg-red-200"
+            className="px-3 py-1 rounded bg-gray-100 border border-gray-300 text-gray-700 text-sm hover:bg-gray-200"
           >
             Clear
           </button>
@@ -161,6 +164,14 @@ export default function DrawingCanvas({ enabled, width, height, clearTrigger, on
           >
             Print
           </button>
+        </div>
+      )}
+      {enabled && !hasDrawn && (
+        <div
+          className="no-print absolute top-4 right-4 px-3 py-1 rounded-full bg-white/90 border border-gray-300 text-xs text-gray-600"
+          style={{ pointerEvents: 'none', zIndex: 20 }}
+        >
+          Click and drag to draw
         </div>
       )}
     </div>
