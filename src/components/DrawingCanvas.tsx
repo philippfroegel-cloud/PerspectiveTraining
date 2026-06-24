@@ -1,13 +1,18 @@
 import { useEffect, useRef, useState } from 'react'
 
+const BLACK_CROSSHAIR_CURSOR = `url("data:image/svg+xml,${encodeURIComponent(
+  "<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16'><path d='M8 1v14M1 8h14' stroke='black' stroke-width='1.5' stroke-linecap='round'/></svg>"
+)}") 8 8, crosshair`
+
 interface Props {
   enabled: boolean
   width: number
   height: number
   clearTrigger?: number
+  onPrint?: () => void
 }
 
-export default function DrawingCanvas({ enabled, width, height, clearTrigger }: Props) {
+export default function DrawingCanvas({ enabled, width, height, clearTrigger, onPrint }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const ctxRef = useRef<CanvasRenderingContext2D | null>(null)
   const drawingRef = useRef(false)
@@ -130,7 +135,7 @@ export default function DrawingCanvas({ enabled, width, height, clearTrigger }: 
           width: '100%',
           height: '100%',
           pointerEvents: enabled ? 'auto' : 'none',
-          cursor: enabled ? 'crosshair' : 'default',
+          cursor: enabled ? BLACK_CROSSHAIR_CURSOR : 'default',
         }}
       />
       {enabled && (
@@ -149,6 +154,12 @@ export default function DrawingCanvas({ enabled, width, height, clearTrigger }: 
             className="px-3 py-1 rounded bg-red-100 border border-red-300 text-red-700 text-sm hover:bg-red-200"
           >
             Clear
+          </button>
+          <button
+            onClick={onPrint}
+            className="px-3 py-1 rounded bg-gray-100 border border-gray-300 text-gray-700 text-sm hover:bg-gray-200"
+          >
+            Print
           </button>
         </div>
       )}

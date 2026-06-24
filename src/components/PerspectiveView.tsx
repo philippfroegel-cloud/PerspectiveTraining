@@ -1,15 +1,15 @@
 import { useEffect, useRef } from 'react'
 import * as THREE from 'three'
-import { getPerspectiveParams } from '../utils/perspective'
+import type { PerspectiveParams } from '../utils/perspective'
 
 interface Props {
   gridSize: number
-  orientationSeed: number
+  perspective: PerspectiveParams
   shapeImagePath: string
   showShape: boolean
 }
 
-export default function PerspectiveView({ gridSize, orientationSeed, shapeImagePath, showShape }: Props) {
+export default function PerspectiveView({ gridSize, perspective, shapeImagePath, showShape }: Props) {
   const mountRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -18,15 +18,13 @@ export default function PerspectiveView({ gridSize, orientationSeed, shapeImageP
 
     const width  = mount.clientWidth
     const height = mount.clientHeight
-    const aspect = width / height
 
     // ── Scene ──────────────────────────────────────────────────────────
     const scene    = new THREE.Scene()
     scene.background = new THREE.Color(0xffffff)
 
     // ── Camera ─────────────────────────────────────────────────────────
-    // True random perspective generated from a seed token.
-    const { azimuthRad, elevationRad, rollRad, distance, fov } = getPerspectiveParams(orientationSeed, aspect)
+    const { azimuthRad, elevationRad, rollRad, distance, fov } = perspective
     const camera = new THREE.PerspectiveCamera(fov, width / height, 0.1, 100)
     camera.position.set(
       Math.cos(azimuthRad) * Math.cos(elevationRad) * distance,
@@ -108,12 +106,11 @@ export default function PerspectiveView({ gridSize, orientationSeed, shapeImageP
         opacity: 1,
         alphaTest: 0.01,
         side: THREE.DoubleSide,
-        depthTest: false,
+        depthTest: true,
         depthWrite: false,
       })
       shapeMesh = new THREE.Mesh(new THREE.PlaneGeometry(4, 4), shapeMat)
-      shapeMesh.position.z = 0.001
-      shapeMesh.renderOrder = 5
+      shapeMesh.position.z = -0.0005
       scene.add(shapeMesh)
     }
 
@@ -161,7 +158,7 @@ export default function PerspectiveView({ gridSize, orientationSeed, shapeImageP
       fillMesh.geometry.dispose()
       mount.removeChild(renderer.domElement)
     }
-  }, [gridSize, orientationSeed, shapeImagePath, showShape])
+  }, [gridSize, perspective, shapeImagePath, showShape])
 
   return <div ref={mountRef} className="w-full h-full" />
 }

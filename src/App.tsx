@@ -1,9 +1,9 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useGridSettings } from './hooks/useGridSettings'
 import FlatView from './components/FlatView'
 import PerspectiveView from './components/PerspectiveView'
 import DrawingCanvas from './components/DrawingCanvas'
-import { getPerspectiveParams } from './utils/perspective'
+import { computeFitDistance, getPerspectiveParams } from './utils/perspective'
 
 export default function App() {
   const {
@@ -18,6 +18,11 @@ export default function App() {
   const perspectiveAreaRef = useRef<HTMLDivElement>(null)
   const [perspectiveSize, setPerspectiveSize] = useState({ width: 0, height: 0 })
   const [printImageDataUrl, setPrintImageDataUrl] = useState<string | null>(null)
+  const [azimuthDeg, setAzimuthDeg] = useState(90)
+  const [elevationDeg, setElevationDeg] = useState(30)
+  const [fovDeg, setFovDeg] = useState(50)
+  const [rollRad, setRollRad] = useState(0)
+  const [framingPadding, setFramingPadding] = useState(1.1)
 
   useEffect(() => {
     const target = perspectiveAreaRef.current
@@ -40,6 +45,20 @@ export default function App() {
       window.removeEventListener('resize', updateSize)
     }
   }, [])
+
+  const aspectForDebug =
+    perspectiveSize.width > 0 && perspectiveSize.height > 0
+      ? perspectiveSize.width / perspectiveSize.height
+      : 1
+
+  useEffect(() => {
+    const randomBase = getPerspectiveParams(settings.orientationSeed, aspectForDebug)
+    setAzimuthDeg(Math.round((randomBase.azimuthRad * 180) / Math.PI))
+    setElevationDeg(Math.round((randomBase.elevationRad * 180) / Math.PI))
+    setFovDeg(Math.round(randomBase.fov))
+    setRollRad(randomBase.rollRad)
+    setFramingPadding(randomBase.framingPadding)
+  }, [settings.orientationSeed, aspectForDebug])
 
   const capturePerspectiveSnapshot = (): string | null => {
     const container = perspectiveAreaRef.current
@@ -80,16 +99,19 @@ export default function App() {
       window.print()
     })
   }
-  const aspectForDebug =
-    perspectiveSize.width > 0 && perspectiveSize.height > 0
-      ? perspectiveSize.width / perspectiveSize.height
-      : 1
-  const currentPerspective = getPerspectiveParams(settings.orientationSeed, aspectForDebug)
-  const azimuthDeg = Math.round((currentPerspective.azimuthRad * 180) / Math.PI)
-  const elevationDeg = Math.round((currentPerspective.elevationRad * 180) / Math.PI)
-  const rollDeg = Math.round((currentPerspective.rollRad * 180) / Math.PI)
-  const distance = currentPerspective.distance.toFixed(2)
-  const fov = Math.round(currentPerspective.fov)
+
+  const currentPerspective = useMemo(() => {
+    const zoomScale = 1.5
+    const distance = computeFitDistance(aspectForDebug, fovDeg, framingPadding) / zoomScale
+    return {
+      azimuthRad: (azimuthDeg * Math.PI) / 180,
+      elevationRad: (elevationDeg * Math.PI) / 180,
+      rollRad,
+      fov: fovDeg,
+      distance,
+      framingPadding,
+    }
+  }, [aspectForDebug, azimuthDeg, elevationDeg, fovDeg, rollRad, framingPadding])
 
   return (
     <div className="flex flex-col h-screen bg-gray-50">
@@ -127,7 +149,7 @@ export default function App() {
                 </p>
                 <input
                   type="range"
-                  min={2}
+                  min={1}
                   max={8}
                   value={settings.gridSize}
                   onChange={e => setGridSize(Number(e.target.value))}
@@ -171,14 +193,46 @@ export default function App() {
                 </div>
                 <span className="text-sm text-gray-700">Show shape</span>
               </label>
-              <button
-                onClick={handlePrint}
-                className="px-3 py-2 rounded bg-gray-100 text-gray-700 hover:bg-gray-200 text-sm"
-              >
-                Print
-              </button>
-              <div className="text-xs text-gray-500 bg-white border border-gray-200 rounded px-2 py-1">
-                az: {azimuthDeg}deg | el: {elevationDeg}deg | roll: {rollDeg}deg | d: {distance} | fov: {fov}
+            </div>
+            <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div className="flex items-end gap-2">
+                <label className="text-xs text-gray-500 uppercase tracking-wider whitespace-nowrap">
+                  Azimuth {azimuthDeg}deg
+                </label>
+                <input
+                  type="range"
+                  min={0}
+                  max={180}
+                  value={azimuthDeg}
+                  onChange={e => setAzimuthDeg(Number(e.target.value))}
+                  className="w-full accent-amber-500"
+                />
+              </div>
+              <div className="flex items-end gap-2">
+                <label className="text-xs text-gray-500 uppercase tracking-wider whitespace-nowrap">
+                  Elevation {elevationDeg}deg
+                </label>
+                <input
+                  type="range"
+                  min={-90}
+                  max={90}
+                  value={elevationDeg}
+                  onChange={e => setElevationDeg(Number(e.target.value))}
+                  className="w-full accent-amber-500"
+                />
+              </div>
+              <div className="flex items-end gap-2">
+                <label className="text-xs text-gray-500 uppercase tracking-wider whitespace-nowrap">
+                  FOV {fovDeg}deg
+                </label>
+                <input
+                  type="range"
+                  min={42}
+                  max={120}
+                  value={fovDeg}
+                  onChange={e => setFovDeg(Number(e.target.value))}
+                  className="w-full accent-amber-500"
+                />
               </div>
             </div>
           </div>
@@ -190,7 +244,7 @@ export default function App() {
           >
             <PerspectiveView
               gridSize={settings.gridSize}
-              orientationSeed={settings.orientationSeed}
+              perspective={currentPerspective}
               shapeImagePath={currentShape.imagePath}
               showShape={settings.showShapeOnGrid}
             />
@@ -199,6 +253,7 @@ export default function App() {
               width={perspectiveSize.width}
               height={perspectiveSize.height}
               clearTrigger={settings.orientationSeed}
+              onPrint={handlePrint}
             />
           </div>
           <img
