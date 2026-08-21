@@ -3,7 +3,11 @@ import { useGridSettings } from './hooks/useGridSettings'
 import FlatView from './components/FlatView'
 import PerspectiveView from './components/PerspectiveView'
 import DrawingCanvas from './components/DrawingCanvas'
+import { shapes } from './shapes/shapes'
 import { computeFitDistance, getPerspectiveParams } from './utils/perspective'
+import { prefetchShapeTextures } from './utils/shapeTextures'
+
+prefetchShapeTextures(shapes.map(shape => shape.imagePath))
 
 export default function App() {
   const {

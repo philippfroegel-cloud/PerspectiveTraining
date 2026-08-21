@@ -1,4 +1,4 @@
-import type { Shape } from '../shapes/shapes'
+import { shapes, type Shape } from '../shapes/shapes'
 
 interface Props {
   shape: Shape
@@ -41,16 +41,24 @@ export default function FlatView({ shape, gridSize, showShape }: Props) {
           </clipPath>
         </defs>
 
-        {showShape && (
-          <image
-            href={shape.imagePath}
-            x={0} y={0}
-            width={size} height={size}
-            preserveAspectRatio="xMidYMid meet"
-            clipPath="url(#grid-clip)"
-            opacity={0.6}
-          />
-        )}
+        {/* Keep every shape mounted; toggle visibility instead of swapping href. */}
+        {shapes.map(entry => {
+          const active = entry.imagePath === shape.imagePath
+          return (
+            <image
+              key={entry.id}
+              href={entry.imagePath}
+              x={0}
+              y={0}
+              width={size}
+              height={size}
+              preserveAspectRatio="xMidYMid meet"
+              clipPath="url(#grid-clip)"
+              opacity={showShape && active ? 0.6 : 0}
+              visibility={active ? 'visible' : 'hidden'}
+            />
+          )
+        })}
         {gridLines}
         {/* Orientation cues: bolder bottom edge + small bottom-left marker */}
         <line

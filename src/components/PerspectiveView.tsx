@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import * as THREE from 'three'
 import type { PerspectiveParams } from '../utils/perspective'
+import { acquireShapeTexture, getCachedShapeTexture } from '../utils/shapeTextures'
 
 interface Props {
   gridSize: number
@@ -9,124 +10,169 @@ interface Props {
   showShape: boolean
 }
 
+type SceneContext = {
+  mount: HTMLDivElement
+  scene: THREE.Scene
+  camera: THREE.PerspectiveCamera
+  renderer: THREE.WebGLRenderer
+  gridGroup: THREE.Group
+  shapeMesh: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial> | null
+  animId: number
+}
+
+const shapePlaneGeometry = new THREE.PlaneGeometry(4, 4)
+
+function applyCamera(camera: THREE.PerspectiveCamera, perspective: PerspectiveParams, aspect: number) {
+  const { azimuthRad, elevationRad, rollRad, distance, fov } = perspective
+  camera.fov = fov
+  camera.aspect = aspect
+  camera.position.set(
+    Math.cos(azimuthRad) * Math.cos(elevationRad) * distance,
+    Math.sin(elevationRad) * distance,
+    Math.sin(azimuthRad) * Math.cos(elevationRad) * distance
+  )
+  camera.rotation.set(0, 0, 0)
+  camera.lookAt(0, 0, 0)
+  camera.rotateZ(rollRad)
+  camera.updateProjectionMatrix()
+}
+
+function disposeGroup(group: THREE.Group) {
+  group.traverse(object => {
+    if (object instanceof THREE.Mesh || object instanceof THREE.Line || object instanceof THREE.LineSegments) {
+      object.geometry.dispose()
+      if (Array.isArray(object.material)) {
+        object.material.forEach(material => material.dispose())
+      } else {
+        object.material.dispose()
+      }
+    }
+  })
+  group.clear()
+}
+
+function buildGridGroup(gridSize: number): THREE.Group {
+  const group = new THREE.Group()
+
+  const halfSize = 2
+  const fullSize = halfSize * 2
+  const step = fullSize / gridSize
+  const linePositions: number[] = []
+  for (let i = 0; i <= gridSize; i++) {
+    const t = -halfSize + i * step
+    linePositions.push(t, -halfSize, 0, t, halfSize, 0)
+    linePositions.push(-halfSize, t, 0, halfSize, t, 0)
+  }
+
+  const gridGeo = new THREE.BufferGeometry()
+  gridGeo.setAttribute('position', new THREE.Float32BufferAttribute(linePositions, 3))
+  group.add(new THREE.LineSegments(gridGeo, new THREE.LineBasicMaterial({ color: 0x9ca3af })))
+
+  const borderGeo = new THREE.EdgesGeometry(new THREE.PlaneGeometry(4, 4, 1, 1))
+  group.add(new THREE.LineSegments(borderGeo, new THREE.LineBasicMaterial({ color: 0x6b7280, linewidth: 2 })))
+
+  const bottomEdgeGeo = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(-2, -2, 0.002),
+    new THREE.Vector3(2, -2, 0.002),
+  ])
+  group.add(new THREE.Line(bottomEdgeGeo, new THREE.LineBasicMaterial({ color: 0x374151 })))
+
+  const markerGeo = new THREE.BufferGeometry()
+  markerGeo.setAttribute(
+    'position',
+    new THREE.Float32BufferAttribute([
+      -1.92, -1.92, 0.002,
+      -1.62, -1.92, 0.002,
+      -1.92, -1.62, 0.002,
+    ], 3)
+  )
+  markerGeo.setIndex([0, 1, 2])
+  group.add(new THREE.Mesh(markerGeo, new THREE.MeshBasicMaterial({ color: 0x374151, side: THREE.DoubleSide })))
+
+  const fillMesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(4, 4),
+    new THREE.MeshBasicMaterial({ color: 0xfafafa, side: THREE.DoubleSide })
+  )
+  fillMesh.position.z = -0.001
+  group.add(fillMesh)
+
+  return group
+}
+
+function disposeShapeMesh(ctx: SceneContext) {
+  const mesh = ctx.shapeMesh
+  if (!mesh) return
+  ctx.scene.remove(mesh)
+  mesh.material.dispose()
+  ctx.shapeMesh = null
+}
+
+function setShapeTexture(ctx: SceneContext, texture: THREE.Texture, visible: boolean) {
+  let mesh = ctx.shapeMesh
+  if (!mesh) {
+    const shapeMat = new THREE.MeshBasicMaterial({
+      map: texture,
+      transparent: true,
+      opacity: 1,
+      alphaTest: 0.01,
+      side: THREE.DoubleSide,
+      depthTest: true,
+      depthWrite: false,
+    })
+    mesh = new THREE.Mesh(shapePlaneGeometry, shapeMat)
+    mesh.position.z = -0.0005
+    ctx.scene.add(mesh)
+    ctx.shapeMesh = mesh
+  } else if (mesh.material.map !== texture) {
+    mesh.material.map = texture
+    mesh.material.needsUpdate = true
+  }
+  mesh.visible = visible
+}
+
 export default function PerspectiveView({ gridSize, perspective, shapeImagePath, showShape }: Props) {
   const mountRef = useRef<HTMLDivElement>(null)
+  const ctxRef = useRef<SceneContext | null>(null)
+  const showShapeRef = useRef(showShape)
+  showShapeRef.current = showShape
 
+  // Create renderer/scene once; everything else updates in place.
   useEffect(() => {
     const mount = mountRef.current
     if (!mount) return
 
-    const width  = mount.clientWidth
-    const height = mount.clientHeight
-
-    // ── Scene ──────────────────────────────────────────────────────────
-    const scene    = new THREE.Scene()
+    const scene = new THREE.Scene()
     scene.background = new THREE.Color(0xffffff)
 
-    // ── Camera ─────────────────────────────────────────────────────────
-    const { azimuthRad, elevationRad, rollRad, distance, fov } = perspective
-    const camera = new THREE.PerspectiveCamera(fov, width / height, 0.1, 100)
-    camera.position.set(
-      Math.cos(azimuthRad) * Math.cos(elevationRad) * distance,
-      Math.sin(elevationRad) * distance,
-      Math.sin(azimuthRad) * Math.cos(elevationRad) * distance
-    )
-    camera.lookAt(0, 0, 0)
-    camera.rotateZ(rollRad)
-
-    // ── Renderer ───────────────────────────────────────────────────────
+    const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 100)
     const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true })
     renderer.setPixelRatio(window.devicePixelRatio)
-    renderer.setSize(width, height)
+    renderer.setSize(mount.clientWidth, mount.clientHeight)
     mount.appendChild(renderer.domElement)
 
-    // ── Grid plane ─────────────────────────────────────────────────────
-    // Build explicit grid lines so all inner cells are visible.
-    const halfSize = 2
-    const fullSize = halfSize * 2
-    const step = fullSize / gridSize
-    const linePositions: number[] = []
-    for (let i = 0; i <= gridSize; i++) {
-      const t = -halfSize + i * step
-      // vertical
-      linePositions.push(t, -halfSize, 0, t, halfSize, 0)
-      // horizontal
-      linePositions.push(-halfSize, t, 0, halfSize, t, 0)
-    }
-    const gridGeo = new THREE.BufferGeometry()
-    gridGeo.setAttribute('position', new THREE.Float32BufferAttribute(linePositions, 3))
-    const lineMat = new THREE.LineBasicMaterial({ color: 0x9ca3af })
-    const gridMesh = new THREE.LineSegments(gridGeo, lineMat)
-    scene.add(gridMesh)
-
-    // Outer border in darker color so boundary stands out
-    const borderGeo  = new THREE.EdgesGeometry(new THREE.PlaneGeometry(4, 4, 1, 1))
-    const borderMat  = new THREE.LineBasicMaterial({ color: 0x6b7280, linewidth: 2 })
-    const borderMesh = new THREE.LineSegments(borderGeo, borderMat)
-    scene.add(borderMesh)
-
-    // Orientation cues: bolder bottom edge + small bottom-left corner marker
-    const bottomEdgeGeo = new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(-2, -2, 0.002),
-      new THREE.Vector3(2, -2, 0.002),
-    ])
-    const bottomEdgeMat = new THREE.LineBasicMaterial({ color: 0x374151 })
-    const bottomEdgeMesh = new THREE.Line(bottomEdgeGeo, bottomEdgeMat)
-    scene.add(bottomEdgeMesh)
-
-    const markerGeo = new THREE.BufferGeometry()
-    markerGeo.setAttribute(
-      'position',
-      new THREE.Float32BufferAttribute([
-        -1.92, -1.92, 0.002,
-        -1.62, -1.92, 0.002,
-        -1.92, -1.62, 0.002,
-      ], 3)
-    )
-    markerGeo.setIndex([0, 1, 2])
-    const markerMat = new THREE.MeshBasicMaterial({ color: 0x374151, side: THREE.DoubleSide })
-    const markerMesh = new THREE.Mesh(markerGeo, markerMat)
-    scene.add(markerMesh)
-
-    // Subtle fill so the plane reads as a solid surface in the scene
-    const fillMat  = new THREE.MeshBasicMaterial({ color: 0xfafafa, side: THREE.DoubleSide })
-    const fillMesh = new THREE.Mesh(new THREE.PlaneGeometry(4, 4), fillMat)
-    fillMesh.position.z = -0.001  // just behind the lines
-    scene.add(fillMesh)
-
-    // Optional shape overlay on top of the perspective grid.
-    // The PNG is expected to have transparent background.
-    let shapeMesh: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial> | undefined
-    let shapeTexture: THREE.Texture | undefined
-    if (showShape && shapeImagePath) {
-      shapeTexture = new THREE.TextureLoader().load(shapeImagePath)
-      const shapeMat = new THREE.MeshBasicMaterial({
-        map: shapeTexture,
-        transparent: true,
-        opacity: 1,
-        alphaTest: 0.01,
-        side: THREE.DoubleSide,
-        depthTest: true,
-        depthWrite: false,
-      })
-      shapeMesh = new THREE.Mesh(new THREE.PlaneGeometry(4, 4), shapeMat)
-      shapeMesh.position.z = -0.0005
-      scene.add(shapeMesh)
-    }
-
-    // Subtle ambient + directional light (not actually needed for line/basic mats,
-    // but good practice if we add more materials later)
+    const gridGroup = buildGridGroup(gridSize)
+    scene.add(gridGroup)
     scene.add(new THREE.AmbientLight(0xffffff, 0.5))
 
-    // ── Render loop ────────────────────────────────────────────────────
-    let animId: number
+    applyCamera(camera, perspective, mount.clientWidth / mount.clientHeight)
+
+    const ctx: SceneContext = {
+      mount,
+      scene,
+      camera,
+      renderer,
+      gridGroup,
+      shapeMesh: null,
+      animId: 0,
+    }
+    ctxRef.current = ctx
+
     const render = () => {
-      animId = requestAnimationFrame(render)
+      ctx.animId = requestAnimationFrame(render)
       renderer.render(scene, camera)
     }
     render()
 
-    // ── Resize handler ─────────────────────────────────────────────────
     const onResize = () => {
       const w = mount.clientWidth
       const h = mount.clientHeight
@@ -136,29 +182,58 @@ export default function PerspectiveView({ gridSize, perspective, shapeImagePath,
     }
     window.addEventListener('resize', onResize)
 
-    // ── Cleanup ────────────────────────────────────────────────────────
     return () => {
-      cancelAnimationFrame(animId)
+      cancelAnimationFrame(ctx.animId)
       window.removeEventListener('resize', onResize)
+      disposeShapeMesh(ctx)
+      disposeGroup(gridGroup)
       renderer.dispose()
-      if (shapeTexture) shapeTexture.dispose()
-      if (shapeMesh) {
-        shapeMesh.geometry.dispose()
-        shapeMesh.material.dispose()
-      }
-      gridGeo.dispose()
-      lineMat.dispose()
-      borderGeo.dispose()
-      borderMat.dispose()
-      bottomEdgeGeo.dispose()
-      bottomEdgeMat.dispose()
-      markerGeo.dispose()
-      markerMat.dispose()
-      fillMat.dispose()
-      fillMesh.geometry.dispose()
       mount.removeChild(renderer.domElement)
+      ctxRef.current = null
     }
-  }, [gridSize, perspective, shapeImagePath, showShape])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- one-time scene setup
+  }, [])
+
+  useEffect(() => {
+    const ctx = ctxRef.current
+    if (!ctx) return
+    const { width, height } = ctx.mount.getBoundingClientRect()
+    applyCamera(ctx.camera, perspective, width / height)
+  }, [perspective])
+
+  useEffect(() => {
+    const ctx = ctxRef.current
+    if (!ctx) return
+    ctx.scene.remove(ctx.gridGroup)
+    disposeGroup(ctx.gridGroup)
+    ctx.gridGroup = buildGridGroup(gridSize)
+    ctx.scene.add(ctx.gridGroup)
+  }, [gridSize])
+
+  useEffect(() => {
+    const ctx = ctxRef.current
+    if (!ctx || !shapeImagePath) {
+      if (ctx?.shapeMesh) ctx.shapeMesh.visible = false
+      return
+    }
+
+    const cached = getCachedShapeTexture(shapeImagePath)
+    if (cached) {
+      setShapeTexture(ctx, cached, showShapeRef.current)
+      return
+    }
+
+    return acquireShapeTexture(shapeImagePath, texture => {
+      const liveCtx = ctxRef.current
+      if (!liveCtx) return
+      setShapeTexture(liveCtx, texture, showShapeRef.current)
+    })
+  }, [shapeImagePath])
+
+  useEffect(() => {
+    const mesh = ctxRef.current?.shapeMesh
+    if (mesh) mesh.visible = showShape
+  }, [showShape])
 
   return <div ref={mountRef} className="w-full h-full" />
 }

@@ -16,6 +16,7 @@ export default function DrawingCanvas({ enabled, width, height, clearTrigger, on
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const ctxRef = useRef<CanvasRenderingContext2D | null>(null)
   const drawingRef = useRef(false)
+  const activePointerIdRef = useRef<number | null>(null)
   const [eraserMode, setEraserMode] = useState(false)
   const [hasDrawn, setHasDrawn] = useState(false)
 
@@ -55,11 +56,13 @@ export default function DrawingCanvas({ enabled, width, height, clearTrigger, on
     ctxRef.current = nextCtx
   }, [width, height])
 
-  const toCanvasPoint = (event: React.PointerEvent<HTMLCanvasElement>) => {
-    const rect = event.currentTarget.getBoundingClientRect()
+  const toCanvasPoint = (canvas: HTMLCanvasElement, clientX: number, clientY: number) => {
+    const rect = canvas.getBoundingClientRect()
+    const scaleX = canvas.width / rect.width
+    const scaleY = canvas.height / rect.height
     return {
-      x: event.clientX - rect.left,
-      y: event.clientY - rect.top,
+      x: (clientX - rect.left) * scaleX,
+      y: (clientY - rect.top) * scaleY,
     }
   }
 
@@ -67,44 +70,16 @@ export default function DrawingCanvas({ enabled, width, height, clearTrigger, on
     const ctx = ctxRef.current
     if (!ctx) return
     if (eraserMode) {
-      // True eraser on the overlay only (does not affect perspective grid).
       ctx.globalCompositeOperation = 'destination-out'
       ctx.strokeStyle = 'rgba(0,0,0,1)'
+      ctx.fillStyle = 'rgba(0,0,0,1)'
       ctx.lineWidth = ERASER_SIZE
     } else {
       ctx.globalCompositeOperation = 'source-over'
       ctx.strokeStyle = '#ef4444'
+      ctx.fillStyle = '#ef4444'
       ctx.lineWidth = PEN_SIZE
     }
-  }
-
-  const handlePointerDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
-    if (!enabled) return
-    const ctx = ctxRef.current
-    if (!ctx) return
-    if (!hasDrawn) setHasDrawn(true)
-    const point = toCanvasPoint(event)
-    applyBrushStyle()
-    ctx.beginPath()
-    ctx.moveTo(point.x, point.y)
-    drawingRef.current = true
-    event.currentTarget.setPointerCapture(event.pointerId)
-  }
-
-  const handlePointerMove = (event: React.PointerEvent<HTMLCanvasElement>) => {
-    if (!enabled || !drawingRef.current) return
-    const ctx = ctxRef.current
-    if (!ctx) return
-    const point = toCanvasPoint(event)
-    ctx.lineTo(point.x, point.y)
-    ctx.stroke()
-  }
-
-  const finishStroke = () => {
-    const ctx = ctxRef.current
-    if (!ctx) return
-    drawingRef.current = false
-    ctx.closePath()
   }
 
   const clearCanvas = () => {
@@ -115,22 +90,96 @@ export default function DrawingCanvas({ enabled, width, height, clearTrigger, on
     ctx.clearRect(0, 0, canvas.width, canvas.height)
   }
 
+  // Native pointer listeners so we can preventDefault on touch/stylus (stops scroll/pan).
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas || !enabled) return
+
+    const isPrimaryPointer = (event: PointerEvent) => {
+      if (event.pointerType === 'mouse') return event.button === 0
+      return true
+    }
+
+    const stampPoint = (ctx: CanvasRenderingContext2D, x: number, y: number) => {
+      applyBrushStyle()
+      ctx.beginPath()
+      ctx.arc(x, y, (eraserMode ? ERASER_SIZE : PEN_SIZE) / 2, 0, Math.PI * 2)
+      ctx.fill()
+    }
+
+    const onPointerDown = (event: PointerEvent) => {
+      if (!isPrimaryPointer(event)) return
+      if (activePointerIdRef.current !== null) return
+
+      const ctx = ctxRef.current
+      if (!ctx) return
+
+      event.preventDefault()
+      setHasDrawn(true)
+
+      const point = toCanvasPoint(canvas, event.clientX, event.clientY)
+      stampPoint(ctx, point.x, point.y)
+      applyBrushStyle()
+      ctx.beginPath()
+      ctx.moveTo(point.x, point.y)
+      drawingRef.current = true
+      activePointerIdRef.current = event.pointerId
+      canvas.setPointerCapture(event.pointerId)
+    }
+
+    const onPointerMove = (event: PointerEvent) => {
+      if (!drawingRef.current || event.pointerId !== activePointerIdRef.current) return
+
+      const ctx = ctxRef.current
+      if (!ctx) return
+
+      event.preventDefault()
+      const point = toCanvasPoint(canvas, event.clientX, event.clientY)
+      ctx.lineTo(point.x, point.y)
+      ctx.stroke()
+    }
+
+    const finishStroke = (event: PointerEvent) => {
+      if (event.pointerId !== activePointerIdRef.current) return
+
+      const ctx = ctxRef.current
+      if (!ctx) return
+
+      drawingRef.current = false
+      activePointerIdRef.current = null
+      ctx.closePath()
+
+      if (canvas.hasPointerCapture(event.pointerId)) {
+        canvas.releasePointerCapture(event.pointerId)
+      }
+    }
+
+    canvas.addEventListener('pointerdown', onPointerDown, { passive: false })
+    canvas.addEventListener('pointermove', onPointerMove, { passive: false })
+    canvas.addEventListener('pointerup', finishStroke)
+    canvas.addEventListener('pointercancel', finishStroke)
+
+    return () => {
+      canvas.removeEventListener('pointerdown', onPointerDown)
+      canvas.removeEventListener('pointermove', onPointerMove)
+      canvas.removeEventListener('pointerup', finishStroke)
+      canvas.removeEventListener('pointercancel', finishStroke)
+    }
+  }, [enabled, eraserMode, width, height])
+
   // Reset drawing whenever perspective is randomized.
   useEffect(() => {
     clearCanvas()
     setEraserMode(false)
     setHasDrawn(false)
+    drawingRef.current = false
+    activePointerIdRef.current = null
   }, [clearTrigger])
 
   return (
     <div className="absolute inset-0" style={{ zIndex: 10 }}>
       <canvas
         ref={canvasRef}
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={finishStroke}
-        onPointerLeave={finishStroke}
-        onPointerCancel={finishStroke}
         style={{
           position: 'absolute',
           top: 0,
@@ -139,6 +188,8 @@ export default function DrawingCanvas({ enabled, width, height, clearTrigger, on
           height: '100%',
           pointerEvents: enabled ? 'auto' : 'none',
           cursor: enabled ? BLACK_CROSSHAIR_CURSOR : 'default',
+          touchAction: 'none',
+          userSelect: 'none',
         }}
       />
       {enabled && (
@@ -171,7 +222,7 @@ export default function DrawingCanvas({ enabled, width, height, clearTrigger, on
           className="no-print absolute top-4 right-4 px-3 py-1 rounded-full bg-white/90 border border-gray-300 text-xs text-gray-600"
           style={{ pointerEvents: 'none', zIndex: 20 }}
         >
-          Click and drag to draw
+          Touch or drag to draw
         </div>
       )}
     </div>
