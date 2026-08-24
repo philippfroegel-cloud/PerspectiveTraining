@@ -1,13 +1,16 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, type MutableRefObject } from 'react'
 import * as THREE from 'three'
 import type { PerspectiveParams } from '../utils/perspective'
+import { applyCamera, projectPointerWithCamera, type ProjectPointerToPlane } from '../utils/planeProjection'
 import { acquireShapeTexture, getCachedShapeTexture } from '../utils/shapeTextures'
 
 interface Props {
   gridSize: number
   perspective: PerspectiveParams
-  shapeImagePath: string
-  showShape: boolean
+  shapeImagePath?: string
+  showShape?: boolean
+  drawingCanvas?: HTMLCanvasElement | null
+  projectPointerRef?: MutableRefObject<ProjectPointerToPlane | null>
 }
 
 type SceneContext = {
@@ -16,25 +19,25 @@ type SceneContext = {
   camera: THREE.PerspectiveCamera
   renderer: THREE.WebGLRenderer
   gridGroup: THREE.Group
-  shapeMesh: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial> | null
+  hitMesh: THREE.Mesh
+  shapeOverlayMesh: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial> | null
+  drawingOverlayMesh: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial> | null
+  drawingTexture: THREE.CanvasTexture | null
+  drawingCopyCanvas: HTMLCanvasElement | null
   animId: number
 }
 
 const shapePlaneGeometry = new THREE.PlaneGeometry(4, 4)
 
-function applyCamera(camera: THREE.PerspectiveCamera, perspective: PerspectiveParams, aspect: number) {
-  const { azimuthRad, elevationRad, rollRad, distance, fov } = perspective
-  camera.fov = fov
-  camera.aspect = aspect
-  camera.position.set(
-    Math.cos(azimuthRad) * Math.cos(elevationRad) * distance,
-    Math.sin(elevationRad) * distance,
-    Math.sin(azimuthRad) * Math.cos(elevationRad) * distance
-  )
-  camera.rotation.set(0, 0, 0)
-  camera.lookAt(0, 0, 0)
-  camera.rotateZ(rollRad)
-  camera.updateProjectionMatrix()
+function disposeOverlayMesh(mesh: THREE.Mesh | null) {
+  if (!mesh) return
+  mesh.parent?.remove(mesh)
+  const material = mesh.material
+  if (Array.isArray(material)) {
+    material.forEach(entry => entry.dispose())
+  } else {
+    material.dispose()
+  }
 }
 
 function disposeGroup(group: THREE.Group) {
@@ -99,42 +102,137 @@ function buildGridGroup(gridSize: number): THREE.Group {
   return group
 }
 
-function disposeShapeMesh(ctx: SceneContext) {
-  const mesh = ctx.shapeMesh
-  if (!mesh) return
-  ctx.scene.remove(mesh)
-  mesh.material.dispose()
-  ctx.shapeMesh = null
+function disposeShapeOverlay(ctx: SceneContext) {
+  disposeOverlayMesh(ctx.shapeOverlayMesh)
+  ctx.shapeOverlayMesh = null
 }
 
-function setShapeTexture(ctx: SceneContext, texture: THREE.Texture, visible: boolean) {
-  let mesh = ctx.shapeMesh
+function disposeDrawingOverlay(ctx: SceneContext) {
+  disposeOverlayMesh(ctx.drawingOverlayMesh)
+  ctx.drawingOverlayMesh = null
+}
+
+function setShapeOverlayTexture(
+  ctx: SceneContext,
+  texture: THREE.Texture,
+  visible: boolean,
+  options?: { alphaTest?: number },
+) {
+  let mesh = ctx.shapeOverlayMesh
   if (!mesh) {
-    const shapeMat = new THREE.MeshBasicMaterial({
+    const overlayMat = new THREE.MeshBasicMaterial({
       map: texture,
       transparent: true,
       opacity: 1,
-      alphaTest: 0.01,
+      alphaTest: options?.alphaTest,
       side: THREE.DoubleSide,
       depthTest: true,
       depthWrite: false,
     })
-    mesh = new THREE.Mesh(shapePlaneGeometry, shapeMat)
-    mesh.position.z = -0.0005
+    mesh = new THREE.Mesh(shapePlaneGeometry, overlayMat)
+    mesh.position.z = -0.0006
     ctx.scene.add(mesh)
-    ctx.shapeMesh = mesh
+    ctx.shapeOverlayMesh = mesh
   } else if (mesh.material.map !== texture) {
     mesh.material.map = texture
+    mesh.material.alphaTest = options?.alphaTest ?? 0
     mesh.material.needsUpdate = true
   }
   mesh.visible = visible
 }
 
-export default function PerspectiveView({ gridSize, perspective, shapeImagePath, showShape }: Props) {
+function syncDrawingOverlay(ctx: SceneContext, sourceCanvas: HTMLCanvasElement) {
+  if (sourceCanvas.width <= 0 || sourceCanvas.height <= 0) return
+
+  const size = Math.max(sourceCanvas.width, sourceCanvas.height)
+
+  let copyCanvas = ctx.drawingCopyCanvas
+  if (!copyCanvas) {
+    copyCanvas = document.createElement('canvas')
+    ctx.drawingCopyCanvas = copyCanvas
+  }
+  if (copyCanvas.width !== size || copyCanvas.height !== size) {
+    copyCanvas.width = size
+    copyCanvas.height = size
+    if (ctx.drawingTexture) {
+      ctx.drawingTexture.dispose()
+      ctx.drawingTexture = null
+      disposeDrawingOverlay(ctx)
+    }
+  }
+
+  const copyCtx = copyCanvas.getContext('2d')
+  if (!copyCtx) return
+  copyCtx.clearRect(0, 0, size, size)
+  copyCtx.drawImage(
+    sourceCanvas,
+    0,
+    0,
+    sourceCanvas.width,
+    sourceCanvas.height,
+    0,
+    0,
+    size,
+    size,
+  )
+
+  if (!ctx.drawingTexture) {
+    const texture = new THREE.CanvasTexture(copyCanvas)
+    texture.minFilter = THREE.LinearFilter
+    texture.magFilter = THREE.LinearFilter
+    texture.colorSpace = THREE.SRGBColorSpace
+    ctx.drawingTexture = texture
+
+    const overlayMat = new THREE.MeshBasicMaterial({
+      map: texture,
+      transparent: false,
+      opacity: 1,
+      alphaTest: 0.12,
+      side: THREE.FrontSide,
+      depthTest: true,
+      depthWrite: true,
+      toneMapped: false,
+    })
+    overlayMat.customProgramCacheKey = () => 'opaque-drawing-overlay'
+    overlayMat.onBeforeCompile = shader => {
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <map_fragment>',
+        `#include <map_fragment>
+         if (diffuseColor.a < 0.12) discard;
+         diffuseColor.rgb /= max(diffuseColor.a, 0.001);
+         diffuseColor.a = 1.0;`,
+      )
+    }
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(4, 4), overlayMat)
+    mesh.position.z = 0.002
+    ctx.scene.add(mesh)
+    ctx.drawingOverlayMesh = mesh
+  } else {
+    ctx.drawingTexture.image = copyCanvas
+  }
+
+  ctx.drawingTexture.needsUpdate = true
+  if (ctx.drawingOverlayMesh) {
+    ctx.drawingOverlayMesh.visible = true
+  }
+}
+
+export default function PerspectiveView({
+  gridSize,
+  perspective,
+  shapeImagePath = '',
+  showShape = false,
+  drawingCanvas = null,
+  projectPointerRef,
+}: Props) {
   const mountRef = useRef<HTMLDivElement>(null)
   const ctxRef = useRef<SceneContext | null>(null)
+  const perspectiveRef = useRef(perspective)
   const showShapeRef = useRef(showShape)
+  const drawingCanvasRef = useRef(drawingCanvas)
+  perspectiveRef.current = perspective
   showShapeRef.current = showShape
+  drawingCanvasRef.current = drawingCanvas
 
   // Create renderer/scene once; everything else updates in place.
   useEffect(() => {
@@ -147,14 +245,40 @@ export default function PerspectiveView({ gridSize, perspective, shapeImagePath,
     const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 100)
     const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true })
     renderer.setPixelRatio(window.devicePixelRatio)
-    renderer.setSize(mount.clientWidth, mount.clientHeight)
-    mount.appendChild(renderer.domElement)
 
     const gridGroup = buildGridGroup(gridSize)
     scene.add(gridGroup)
     scene.add(new THREE.AmbientLight(0xffffff, 0.5))
 
-    applyCamera(camera, perspective, mount.clientWidth / mount.clientHeight)
+    const hitMesh = new THREE.Mesh(
+      new THREE.PlaneGeometry(4, 4),
+      new THREE.MeshBasicMaterial({ visible: false, side: THREE.DoubleSide }),
+    )
+    scene.add(hitMesh)
+
+    renderer.domElement.style.display = 'block'
+    renderer.domElement.style.width = '100%'
+    renderer.domElement.style.height = '100%'
+
+    const syncViewport = () => {
+      const w = mount.clientWidth
+      const h = mount.clientHeight
+      if (w <= 0 || h <= 0) return
+      applyCamera(camera, perspectiveRef.current, w / h)
+      renderer.setPixelRatio(window.devicePixelRatio)
+      renderer.setSize(w, h)
+    }
+
+    syncViewport()
+    applyCamera(
+      camera,
+      perspective,
+      mount.clientWidth > 0 && mount.clientHeight > 0
+        ? mount.clientWidth / mount.clientHeight
+        : 1
+    )
+
+    mount.appendChild(renderer.domElement)
 
     const ctx: SceneContext = {
       mount,
@@ -162,34 +286,48 @@ export default function PerspectiveView({ gridSize, perspective, shapeImagePath,
       camera,
       renderer,
       gridGroup,
-      shapeMesh: null,
+      hitMesh,
+      shapeOverlayMesh: null,
+      drawingOverlayMesh: null,
+      drawingTexture: null,
+      drawingCopyCanvas: null,
       animId: 0,
     }
     ctxRef.current = ctx
 
     const render = () => {
       ctx.animId = requestAnimationFrame(render)
+      const canvas = drawingCanvasRef.current
+      if (canvas && canvas.width > 0 && canvas.height > 0) {
+        syncDrawingOverlay(ctx, canvas)
+      }
       renderer.render(scene, camera)
     }
     render()
 
-    const onResize = () => {
-      const w = mount.clientWidth
-      const h = mount.clientHeight
-      camera.aspect = w / h
-      camera.updateProjectionMatrix()
-      renderer.setSize(w, h)
-    }
-    window.addEventListener('resize', onResize)
+    const resizeObserver = new ResizeObserver(syncViewport)
+    resizeObserver.observe(mount)
+    window.addEventListener('resize', syncViewport)
 
     return () => {
       cancelAnimationFrame(ctx.animId)
-      window.removeEventListener('resize', onResize)
-      disposeShapeMesh(ctx)
+      resizeObserver.disconnect()
+      window.removeEventListener('resize', syncViewport)
+      disposeShapeOverlay(ctx)
+      disposeDrawingOverlay(ctx)
+      ctx.drawingTexture?.dispose()
+      ctx.drawingTexture = null
       disposeGroup(gridGroup)
+      hitMesh.geometry.dispose()
+      if (Array.isArray(hitMesh.material)) {
+        hitMesh.material.forEach(material => material.dispose())
+      } else {
+        hitMesh.material.dispose()
+      }
       renderer.dispose()
       mount.removeChild(renderer.domElement)
       ctxRef.current = null
+      if (projectPointerRef) projectPointerRef.current = null
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- one-time scene setup
   }, [])
@@ -197,8 +335,10 @@ export default function PerspectiveView({ gridSize, perspective, shapeImagePath,
   useEffect(() => {
     const ctx = ctxRef.current
     if (!ctx) return
-    const { width, height } = ctx.mount.getBoundingClientRect()
-    applyCamera(ctx.camera, perspective, width / height)
+    const w = ctx.mount.clientWidth
+    const h = ctx.mount.clientHeight
+    const aspect = w > 0 && h > 0 ? w / h : 1
+    applyCamera(ctx.camera, perspective, aspect)
   }, [perspective])
 
   useEffect(() => {
@@ -208,32 +348,54 @@ export default function PerspectiveView({ gridSize, perspective, shapeImagePath,
     disposeGroup(ctx.gridGroup)
     ctx.gridGroup = buildGridGroup(gridSize)
     ctx.scene.add(ctx.gridGroup)
+    if (ctx.shapeOverlayMesh) ctx.scene.add(ctx.shapeOverlayMesh)
+    if (ctx.drawingOverlayMesh) ctx.scene.add(ctx.drawingOverlayMesh)
   }, [gridSize])
 
   useEffect(() => {
     const ctx = ctxRef.current
     if (!ctx || !shapeImagePath) {
-      if (ctx?.shapeMesh) ctx.shapeMesh.visible = false
+      if (ctx?.shapeOverlayMesh) ctx.shapeOverlayMesh.visible = false
       return
     }
 
     const cached = getCachedShapeTexture(shapeImagePath)
     if (cached) {
-      setShapeTexture(ctx, cached, showShapeRef.current)
+      setShapeOverlayTexture(ctx, cached, showShapeRef.current, { alphaTest: 0.01 })
       return
     }
 
     return acquireShapeTexture(shapeImagePath, texture => {
       const liveCtx = ctxRef.current
       if (!liveCtx) return
-      setShapeTexture(liveCtx, texture, showShapeRef.current)
+      setShapeOverlayTexture(liveCtx, texture, showShapeRef.current, { alphaTest: 0.01 })
     })
   }, [shapeImagePath])
 
   useEffect(() => {
-    const mesh = ctxRef.current?.shapeMesh
+    const mesh = ctxRef.current?.shapeOverlayMesh
     if (mesh) mesh.visible = showShape
   }, [showShape])
+
+  useEffect(() => {
+    if (!projectPointerRef) return
+    projectPointerRef.current = (clientX, clientY, canvasWidth, canvasHeight) => {
+      const ctx = ctxRef.current
+      if (!ctx) return null
+      return projectPointerWithCamera(
+        ctx.camera,
+        ctx.renderer.domElement,
+        ctx.hitMesh,
+        clientX,
+        clientY,
+        canvasWidth,
+        canvasHeight,
+      )
+    }
+    return () => {
+      projectPointerRef.current = null
+    }
+  }, [projectPointerRef])
 
   return <div ref={mountRef} className="w-full h-full" />
 }

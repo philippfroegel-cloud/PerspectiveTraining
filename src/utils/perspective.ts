@@ -7,6 +7,36 @@ export interface PerspectiveParams {
   framingPadding: number
 }
 
+export const SLIDER_AZIMUTH_MIN_DEG = 0
+export const SLIDER_AZIMUTH_MAX_DEG = 180
+export const SLIDER_FOV_MIN_DEG = 1
+export const SLIDER_FOV_MAX_DEG = 120
+export const RANDOM_AZIMUTH_MIN_DEG = 20
+export const RANDOM_AZIMUTH_MAX_DEG = 160
+
+export function radiansToDegrees(rad: number): number {
+  return (rad * 180) / Math.PI
+}
+
+export function degreesToRadians(deg: number): number {
+  return (deg * Math.PI) / 180
+}
+
+export function roundDegrees(rad: number): number {
+  return Math.round(radiansToDegrees(rad))
+}
+
+export function rollDegrees(rad: number): number {
+  const normalized = ((roundDegrees(rad) % 360) + 360) % 360
+  return normalized === 360 ? 0 : normalized
+}
+
+export function applyFovWheelDelta(currentFovDeg: number, deltaY: number): number {
+  return Math.round(
+    Math.min(SLIDER_FOV_MAX_DEG, Math.max(SLIDER_FOV_MIN_DEG, currentFovDeg + deltaY * 0.04)),
+  )
+}
+
 export function makeSeededRandom(seed: number): () => number {
   let state = Math.floor(seed * 2147483647) ^ 0x9e3779b9
   return () => {
@@ -17,7 +47,8 @@ export function makeSeededRandom(seed: number): () => number {
 
 export function computeFitDistance(aspectRatio: number, fov: number, framingPadding: number): number {
   const safeAspect = Math.max(0.1, aspectRatio)
-  const halfFovV = (fov * Math.PI / 180) / 2
+  const safeFov = Math.max(SLIDER_FOV_MIN_DEG, fov)
+  const halfFovV = (safeFov * Math.PI / 180) / 2
   const halfFovH = Math.atan(Math.tan(halfFovV) * safeAspect)
   const limitingHalfFov = Math.min(halfFovV, halfFovH)
   const planeHalfSize = 2
@@ -29,10 +60,9 @@ export function computeFitDistance(aspectRatio: number, fov: number, framingPadd
 export function getPerspectiveParams(seed: number, aspectRatio: number): PerspectiveParams {
   const rand = makeSeededRandom(seed)
 
-  // Front hemisphere only.
-  // Keep at least 5° away from 0° and 180°.
-  const minAzimuthRad = 5 * (Math.PI / 180)
-  const maxAzimuthRad = 175 * (Math.PI / 180)
+  // Front hemisphere only. Keep away from edge-on extremes when randomizing.
+  const minAzimuthRad = degreesToRadians(RANDOM_AZIMUTH_MIN_DEG)
+  const maxAzimuthRad = degreesToRadians(RANDOM_AZIMUTH_MAX_DEG)
   const azimuthRad = minAzimuthRad + rand() * (maxAzimuthRad - minAzimuthRad)
   // Signed elevation: include both above and below viewpoints,
   // while skipping the ultra-flat near-zero band.

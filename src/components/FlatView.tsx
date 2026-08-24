@@ -1,12 +1,15 @@
+import { useId } from 'react'
 import { shapes, type Shape } from '../shapes/shapes'
 
 interface Props {
-  shape: Shape
+  shape?: Shape
   gridSize: number
-  showShape: boolean
+  showShape?: boolean
+  gridOnly?: boolean
 }
 
-export default function FlatView({ shape, gridSize, showShape }: Props) {
+export default function FlatView({ shape, gridSize, showShape = false, gridOnly = false }: Props) {
+  const clipId = useId().replace(/:/g, '')
   const size = 500
   const cellSize = size / gridSize
 
@@ -28,21 +31,24 @@ export default function FlatView({ shape, gridSize, showShape }: Props) {
     )
   }
 
+  const viewBox = gridOnly
+    ? `0 0 ${size} ${size}`
+    : `-20 -20 ${size + 40} ${size + 40}`
+
   return (
-    <div className="flex items-center justify-center w-full h-full">
+    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
       <svg
-        viewBox={`-20 -20 ${size + 40} ${size + 40}`}
-        width={size} height={size}
+        viewBox={viewBox}
+        className="w-full h-full"
         style={{ display: 'block', maxWidth: '100%', maxHeight: '100%' }}
       >
         <defs>
-          <clipPath id="grid-clip">
+          <clipPath id={clipId}>
             <rect x={0} y={0} width={size} height={size} />
           </clipPath>
         </defs>
 
-        {/* Keep every shape mounted; toggle visibility instead of swapping href. */}
-        {shapes.map(entry => {
+        {!gridOnly && shape && shapes.map(entry => {
           const active = entry.imagePath === shape.imagePath
           return (
             <image
@@ -53,14 +59,13 @@ export default function FlatView({ shape, gridSize, showShape }: Props) {
               width={size}
               height={size}
               preserveAspectRatio="xMidYMid meet"
-              clipPath="url(#grid-clip)"
+              clipPath={`url(#${clipId})`}
               opacity={showShape && active ? 0.6 : 0}
               visibility={active ? 'visible' : 'hidden'}
             />
           )
         })}
         {gridLines}
-        {/* Orientation cues: bolder bottom edge + small bottom-left marker */}
         <line
           x1={0}
           y1={size}
