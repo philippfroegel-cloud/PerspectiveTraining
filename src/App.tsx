@@ -48,6 +48,21 @@ export default function App() {
             )
           })}
         </nav>
+
+        <p className="ml-auto shrink-0 text-sm text-gray-500">
+          Philipp Frögel
+          <span className="mx-1.5">·</span>
+          <a
+            href="https://github.com/philippfroegel-cloud/PerspectiveTraining"
+            target="_blank"
+            rel="noreferrer"
+            className="hover:text-gray-700"
+          >
+            GitHub
+          </a>
+          <span className="mx-1.5">·</span>
+          <span className="select-all">philipp.froegel@gmail.com</span>
+        </p>
       </header>
 
       <div className="flex flex-1 flex-col min-h-0">
