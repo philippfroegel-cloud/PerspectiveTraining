@@ -1,7 +1,7 @@
 import { useEffect, useRef, type MutableRefObject } from 'react'
 import * as THREE from 'three'
 import type { PerspectiveParams } from '../utils/perspective'
-import { applyCamera, projectPointerWithCamera, type ProjectPointerToPlane } from '../utils/planeProjection'
+import { applyCamera, applySheetSpin, projectPointerWithCamera, type ProjectPointerToPlane } from '../utils/planeProjection'
 import { acquireShapeTexture, getCachedShapeTexture } from '../utils/shapeTextures'
 
 interface Props {
@@ -18,6 +18,7 @@ type SceneContext = {
   scene: THREE.Scene
   camera: THREE.PerspectiveCamera
   renderer: THREE.WebGLRenderer
+  sheetGroup: THREE.Group
   gridGroup: THREE.Group
   hitMesh: THREE.Mesh
   shapeOverlayMesh: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial> | null
@@ -131,7 +132,7 @@ function setShapeOverlayTexture(
     })
     mesh = new THREE.Mesh(shapePlaneGeometry, overlayMat)
     mesh.position.z = -0.0006
-    ctx.scene.add(mesh)
+    ctx.sheetGroup.add(mesh)
     ctx.shapeOverlayMesh = mesh
   } else if (mesh.material.map !== texture) {
     mesh.material.map = texture
@@ -205,7 +206,7 @@ function syncDrawingOverlay(ctx: SceneContext, sourceCanvas: HTMLCanvasElement) 
     }
     const mesh = new THREE.Mesh(new THREE.PlaneGeometry(4, 4), overlayMat)
     mesh.position.z = 0.002
-    ctx.scene.add(mesh)
+    ctx.sheetGroup.add(mesh)
     ctx.drawingOverlayMesh = mesh
   } else {
     ctx.drawingTexture.image = copyCanvas
@@ -246,15 +247,18 @@ export default function PerspectiveView({
     const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true })
     renderer.setPixelRatio(window.devicePixelRatio)
 
+    const sheetGroup = new THREE.Group()
     const gridGroup = buildGridGroup(gridSize)
-    scene.add(gridGroup)
+    sheetGroup.add(gridGroup)
+    scene.add(sheetGroup)
     scene.add(new THREE.AmbientLight(0xffffff, 0.5))
 
     const hitMesh = new THREE.Mesh(
       new THREE.PlaneGeometry(4, 4),
       new THREE.MeshBasicMaterial({ visible: false, side: THREE.DoubleSide }),
     )
-    scene.add(hitMesh)
+    sheetGroup.add(hitMesh)
+    applySheetSpin(sheetGroup, perspective.rollRad)
 
     renderer.domElement.style.display = 'block'
     renderer.domElement.style.width = '100%'
@@ -265,6 +269,7 @@ export default function PerspectiveView({
       const h = mount.clientHeight
       if (w <= 0 || h <= 0) return
       applyCamera(camera, perspectiveRef.current, w / h)
+      applySheetSpin(sheetGroup, perspectiveRef.current.rollRad)
       renderer.setPixelRatio(window.devicePixelRatio)
       renderer.setSize(w, h)
     }
@@ -285,6 +290,7 @@ export default function PerspectiveView({
       scene,
       camera,
       renderer,
+      sheetGroup,
       gridGroup,
       hitMesh,
       shapeOverlayMesh: null,
@@ -339,17 +345,16 @@ export default function PerspectiveView({
     const h = ctx.mount.clientHeight
     const aspect = w > 0 && h > 0 ? w / h : 1
     applyCamera(ctx.camera, perspective, aspect)
+    applySheetSpin(ctx.sheetGroup, perspective.rollRad)
   }, [perspective])
 
   useEffect(() => {
     const ctx = ctxRef.current
     if (!ctx) return
-    ctx.scene.remove(ctx.gridGroup)
+    ctx.sheetGroup.remove(ctx.gridGroup)
     disposeGroup(ctx.gridGroup)
     ctx.gridGroup = buildGridGroup(gridSize)
-    ctx.scene.add(ctx.gridGroup)
-    if (ctx.shapeOverlayMesh) ctx.scene.add(ctx.shapeOverlayMesh)
-    if (ctx.drawingOverlayMesh) ctx.scene.add(ctx.drawingOverlayMesh)
+    ctx.sheetGroup.add(ctx.gridGroup)
   }, [gridSize])
 
   useEffect(() => {

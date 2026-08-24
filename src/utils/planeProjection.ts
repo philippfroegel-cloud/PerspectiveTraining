@@ -19,7 +19,7 @@ export function applyCamera(
   perspective: PerspectiveParams,
   aspect: number,
 ) {
-  const { azimuthRad, elevationRad, rollRad, distance, fov } = perspective
+  const { azimuthRad, elevationRad, distance, fov } = perspective
   camera.fov = Math.max(SLIDER_FOV_MIN_DEG, fov)
   camera.aspect = aspect
   camera.near = Math.max(0.1, distance / 200)
@@ -31,8 +31,11 @@ export function applyCamera(
   )
   camera.rotation.set(0, 0, 0)
   camera.lookAt(0, 0, 0)
-  camera.rotateZ(rollRad)
   camera.updateProjectionMatrix()
+}
+
+export function applySheetSpin(sheet: THREE.Object3D, rollRad: number) {
+  sheet.rotation.z = rollRad
 }
 
 export function projectPointerWithCamera(

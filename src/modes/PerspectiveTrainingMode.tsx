@@ -209,7 +209,7 @@ export default function PerspectiveTrainingMode() {
               onChange={value => setElevationDeg(value)}
             />
             <LabeledRange
-              label="Roll"
+              label="Spin"
               value={displayedRollDeg}
               min={0}
               max={359}

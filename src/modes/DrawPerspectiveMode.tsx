@@ -24,6 +24,7 @@ export default function DrawPerspectiveMode() {
   const [fovDeg, setFovDeg] = useState(50)
   const [rollRad, setRollRad] = useState(0)
   const [framingPadding, setFramingPadding] = useState(1.1)
+  const [printImageDataUrl, setPrintImageDataUrl] = useState<string | null>(null)
 
   useEffect(() => {
     const drawTarget = drawAreaRef.current
@@ -87,6 +88,42 @@ export default function DrawPerspectiveMode() {
 
   const randomOrientation = () => setOrientationSeed(Math.random())
 
+  const capturePerspectiveSnapshot = (): string | null => {
+    const container = perspectiveAreaRef.current
+    if (!container) return null
+    const canvases = container.querySelectorAll('canvas')
+    if (!canvases.length) return null
+
+    const baseCanvas = canvases[0] as HTMLCanvasElement
+    if (baseCanvas.width === 0 || baseCanvas.height === 0) return null
+
+    const out = document.createElement('canvas')
+    out.width = baseCanvas.width
+    out.height = baseCanvas.height
+    const outCtx = out.getContext('2d')
+    if (!outCtx) return null
+
+    outCtx.drawImage(baseCanvas, 0, 0, out.width, out.height)
+    return out.toDataURL('image/png')
+  }
+
+  useEffect(() => {
+    const onBeforePrint = () => {
+      const snapshot = capturePerspectiveSnapshot()
+      if (snapshot) setPrintImageDataUrl(snapshot)
+    }
+    window.addEventListener('beforeprint', onBeforePrint)
+    return () => window.removeEventListener('beforeprint', onBeforePrint)
+  }, [])
+
+  const handlePrint = () => {
+    const snapshot = capturePerspectiveSnapshot()
+    if (snapshot) setPrintImageDataUrl(snapshot)
+    requestAnimationFrame(() => {
+      window.print()
+    })
+  }
+
   const currentPerspective = useMemo(() => {
     const zoomScale = 1.5
     const distance = computeFitDistance(aspectForFraming, fovDeg, framingPadding) / zoomScale
@@ -134,13 +171,13 @@ export default function DrawPerspectiveMode() {
               enabled
               width={drawAreaSize.width}
               height={drawAreaSize.height}
-              showPrint={false}
+              onPrint={handlePrint}
             />
           </div>
         </div>
       </div>
 
-      <div className="flex flex-col flex-1 min-w-0 rounded-xl overflow-hidden bg-white border border-gray-200">
+      <div className="print-perspective-host flex flex-col flex-1 min-w-0 rounded-xl overflow-hidden bg-white border border-gray-200">
         <div className="no-print px-4 pt-3 text-xs text-gray-400 uppercase tracking-wider">Perspective</div>
         <div className="no-print p-3 pt-2">
           <div className="flex flex-wrap items-center gap-3 bg-gray-50 border border-gray-200 rounded-lg p-3">
@@ -167,7 +204,7 @@ export default function DrawPerspectiveMode() {
               onChange={value => setElevationDeg(value)}
             />
             <LabeledRange
-              label="Roll"
+              label="Spin"
               value={displayedRollDeg}
               min={0}
               max={359}
@@ -183,13 +220,18 @@ export default function DrawPerspectiveMode() {
           </div>
         </div>
 
-        <div ref={perspectiveAreaRef} className="relative flex-1 min-h-0 overflow-hidden">
+        <div ref={perspectiveAreaRef} className="print-area relative flex-1 min-h-0 overflow-hidden">
           <PerspectiveView
             gridSize={gridSize}
             perspective={currentPerspective}
             drawingCanvas={drawingSurface}
           />
         </div>
+        <img
+          src={printImageDataUrl ?? ''}
+          alt=""
+          className="print-only perspective-print-image"
+        />
       </div>
     </div>
   )
