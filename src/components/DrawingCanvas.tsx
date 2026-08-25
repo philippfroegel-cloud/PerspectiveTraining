@@ -17,6 +17,44 @@ function cloneCanvas(source: HTMLCanvasElement) {
   return copy
 }
 
+function isInsideGrid(point: { x: number; y: number }, width: number, height: number) {
+  return point.x >= 0 && point.x <= width && point.y >= 0 && point.y <= height
+}
+
+/** Liang–Barsky clip of a segment to the grid rectangle. */
+function clipLineToGrid(
+  a: { x: number; y: number },
+  b: { x: number; y: number },
+  width: number,
+  height: number,
+): { ax: number; ay: number; bx: number; by: number } | null {
+  const dx = b.x - a.x
+  const dy = b.y - a.y
+  let t0 = 0
+  let t1 = 1
+  const clip = (p: number, q: number) => {
+    if (p === 0) return q >= 0
+    const r = q / p
+    if (p < 0) {
+      if (r > t1) return false
+      if (r > t0) t0 = r
+    } else {
+      if (r < t0) return false
+      if (r < t1) t1 = r
+    }
+    return true
+  }
+  if (!clip(-dx, a.x) || !clip(dx, width - a.x) || !clip(-dy, a.y) || !clip(dy, height - a.y)) {
+    return null
+  }
+  return {
+    ax: a.x + t0 * dx,
+    ay: a.y + t0 * dy,
+    bx: a.x + t1 * dx,
+    by: a.y + t1 * dy,
+  }
+}
+
 function mergeRefs<T>(...refs: Array<Ref<T> | undefined>) {
   return (value: T | null) => {
     for (const ref of refs) {
@@ -34,13 +72,14 @@ interface Props {
   surface?: HTMLCanvasElement
   projectPointerRef?: MutableRefObject<ProjectPointerToPlane | null>
   clearTrigger?: number
+  dismissHintTrigger?: number
   onPrint?: () => void
   onDraw?: () => void
   showPrint?: boolean
 }
 
 const DrawingCanvas = forwardRef<HTMLCanvasElement, Props>(function DrawingCanvas(
-  { enabled, width, height, surface, projectPointerRef, clearTrigger, onPrint, onDraw, showPrint = true },
+  { enabled, width, height, surface, projectPointerRef, clearTrigger, dismissHintTrigger, onPrint, onDraw, showPrint = true },
   ref,
 ) {
   const hostRef = useRef<HTMLDivElement>(null)
@@ -50,13 +89,19 @@ const DrawingCanvas = forwardRef<HTMLCanvasElement, Props>(function DrawingCanva
   const activePointerIdRef = useRef<number | null>(null)
   const strokeSnapshotRef = useRef<HTMLCanvasElement | null>(null)
   const strokePointsRef = useRef<Array<{ x: number; y: number }>>([])
+  const strokeDrewRef = useRef(false)
   const undoStackRef = useRef<HTMLCanvasElement[]>([])
   const onDrawRef = useRef(onDraw)
   const eraserModeRef = useRef(false)
   const [eraserMode, setEraserMode] = useState(false)
-  const [hasDrawn, setHasDrawn] = useState(false)
   const [undoCount, setUndoCount] = useState(0)
   const [showDrawHint, setShowDrawHint] = useState(false)
+  const hintDismissedRef = useRef(false)
+
+  const dismissDrawHint = () => {
+    hintDismissedRef.current = true
+    setShowDrawHint(false)
+  }
 
   onDrawRef.current = onDraw
   eraserModeRef.current = eraserMode
@@ -195,15 +240,15 @@ const DrawingCanvas = forwardRef<HTMLCanvasElement, Props>(function DrawingCanva
     if (!canvas || !ctx) return
     ctx.globalCompositeOperation = 'source-over'
     ctx.clearRect(0, 0, canvas.width, canvas.height)
-    setHasDrawn(false)
     clearUndoStack()
+    dismissDrawHint()
     notifyDraw()
   }
 
   useEffect(() => {
     const canvas = getCanvas()
     const host = hostRef.current
-    const eventTarget = projectToPlane ? host : canvas
+    const eventTarget = host?.closest('.drawing-pointer-root') ?? (projectToPlane ? host : canvas)
     if (!eventTarget || !canvas || !enabled) return
 
     const isPrimaryPointer = (event: PointerEvent) => {
@@ -235,26 +280,76 @@ const DrawingCanvas = forwardRef<HTMLCanvasElement, Props>(function DrawingCanva
       restoreStrokeSnapshot(ctx)
       applyBrushStyle()
 
-      const start = points[0]
-      const end = points[points.length - 1]
+      const width = canvas.width
+      const height = canvas.height
       const radius = (eraserModeRef.current ? ERASER_SIZE : PEN_SIZE) / 2
-      if (points.length === 1 || (straight && start.x === end.x && start.y === end.y)) {
-        ctx.beginPath()
-        ctx.arc(start.x, start.y, radius, 0, Math.PI * 2)
-        ctx.fill()
+      let drew = false
+
+      if (straight) {
+        const rawStart = points[0]
+        const rawEnd = points[points.length - 1]
+        const clipped = clipLineToGrid(rawStart, rawEnd, width, height)
+        if (clipped) {
+          if (clipped.ax === clipped.bx && clipped.ay === clipped.by) {
+            ctx.beginPath()
+            ctx.arc(clipped.ax, clipped.ay, radius, 0, Math.PI * 2)
+            ctx.fill()
+          } else {
+            ctx.beginPath()
+            ctx.moveTo(clipped.ax, clipped.ay)
+            ctx.lineTo(clipped.bx, clipped.by)
+            ctx.stroke()
+          }
+          drew = true
+        } else if (isInsideGrid(rawStart, width, height)) {
+          ctx.beginPath()
+          ctx.arc(rawStart.x, rawStart.y, radius, 0, Math.PI * 2)
+          ctx.fill()
+          drew = true
+        }
       } else {
         ctx.beginPath()
-        if (straight) {
-          ctx.moveTo(start.x, start.y)
-          ctx.lineTo(end.x, end.y)
-        } else {
-          ctx.moveTo(start.x, start.y)
-          for (let i = 1; i < points.length; i++) {
-            ctx.lineTo(points[i].x, points[i].y)
+        let pathOpen = false
+        let lastX = 0
+        let lastY = 0
+        const moveOrLine = (x: number, y: number, connect: boolean) => {
+          if (!pathOpen) {
+            ctx.moveTo(x, y)
+            pathOpen = true
+          } else if (connect) {
+            ctx.lineTo(x, y)
+          } else {
+            ctx.moveTo(x, y)
+          }
+          lastX = x
+          lastY = y
+        }
+        for (let i = 0; i < points.length - 1; i++) {
+          const clipped = clipLineToGrid(points[i], points[i + 1], width, height)
+          if (!clipped) continue
+          const connect =
+            pathOpen && Math.abs(lastX - clipped.ax) < 0.01 && Math.abs(lastY - clipped.ay) < 0.01
+          moveOrLine(clipped.ax, clipped.ay, connect)
+          ctx.lineTo(clipped.bx, clipped.by)
+          lastX = clipped.bx
+          lastY = clipped.by
+          pathOpen = true
+          drew = true
+        }
+        if (drew) {
+          ctx.stroke()
+        } else if (points.some(point => isInsideGrid(point, width, height))) {
+          const inside = points.find(point => isInsideGrid(point, width, height))
+          if (inside) {
+            ctx.beginPath()
+            ctx.arc(inside.x, inside.y, radius, 0, Math.PI * 2)
+            ctx.fill()
+            drew = true
           }
         }
-        ctx.stroke()
       }
+
+      strokeDrewRef.current = drew
       notifyDraw()
     }
 
@@ -267,17 +362,21 @@ const DrawingCanvas = forwardRef<HTMLCanvasElement, Props>(function DrawingCanva
       const ctx = ctxRef.current
       if (!ctx) return
 
-      const point = toDrawPoint(pointerEvent.clientX, pointerEvent.clientY)
-      if (!point) return
+      const mapped = toDrawPoint(pointerEvent.clientX, pointerEvent.clientY)
+      if (!mapped) return
 
       pointerEvent.preventDefault()
-      setHasDrawn(true)
+      hintDismissedRef.current = true
+      setShowDrawHint(false)
 
       captureStrokeSnapshot()
-      strokePointsRef.current = [point]
       drawingRef.current = true
+      strokeDrewRef.current = false
       activePointerIdRef.current = pointerEvent.pointerId
-      eventTarget.setPointerCapture(pointerEvent.pointerId)
+      if (eventTarget instanceof HTMLElement) {
+        eventTarget.setPointerCapture(pointerEvent.pointerId)
+      }
+      strokePointsRef.current = [mapped]
       redrawActiveStroke(pointerEvent.shiftKey)
     }
 
@@ -285,14 +384,14 @@ const DrawingCanvas = forwardRef<HTMLCanvasElement, Props>(function DrawingCanva
       const pointerEvent = event as PointerEvent
       if (!drawingRef.current || pointerEvent.pointerId !== activePointerIdRef.current) return
 
-      const point = toDrawPoint(pointerEvent.clientX, pointerEvent.clientY)
-      if (!point) return
+      const mapped = toDrawPoint(pointerEvent.clientX, pointerEvent.clientY)
+      if (!mapped) return
 
       pointerEvent.preventDefault()
       const points = strokePointsRef.current
       const last = points[points.length - 1]
-      if (last && last.x === point.x && last.y === point.y) return
-      points.push(point)
+      if (last && last.x === mapped.x && last.y === mapped.y) return
+      points.push(mapped)
       redrawActiveStroke(pointerEvent.shiftKey)
     }
 
@@ -307,7 +406,7 @@ const DrawingCanvas = forwardRef<HTMLCanvasElement, Props>(function DrawingCanva
       if (pointerEvent.type === 'pointercancel' && snapshot) {
         restoreStrokeSnapshot(ctx)
         notifyDraw()
-      } else if (snapshot) {
+      } else if (snapshot && strokeDrewRef.current) {
         const stack = undoStackRef.current
         stack.push(cloneCanvas(snapshot))
         if (stack.length > UNDO_LIMIT) stack.shift()
@@ -318,9 +417,10 @@ const DrawingCanvas = forwardRef<HTMLCanvasElement, Props>(function DrawingCanva
       activePointerIdRef.current = null
       strokeSnapshotRef.current = null
       strokePointsRef.current = []
+      strokeDrewRef.current = false
       ctx.closePath()
 
-      if (eventTarget.hasPointerCapture(pointerEvent.pointerId)) {
+      if (eventTarget instanceof HTMLElement && eventTarget.hasPointerCapture(pointerEvent.pointerId)) {
         eventTarget.releasePointerCapture(pointerEvent.pointerId)
       }
     }
@@ -333,46 +433,64 @@ const DrawingCanvas = forwardRef<HTMLCanvasElement, Props>(function DrawingCanva
     }
 
     eventTarget.addEventListener('pointerdown', onPointerDown, { passive: false })
-    eventTarget.addEventListener('pointermove', onPointerMove, { passive: false })
-    eventTarget.addEventListener('pointerup', finishStroke)
-    eventTarget.addEventListener('pointercancel', finishStroke)
+    window.addEventListener('pointermove', onPointerMove, { passive: false })
+    window.addEventListener('pointerup', finishStroke)
+    window.addEventListener('pointercancel', finishStroke)
     window.addEventListener('keydown', onShiftChange)
     window.addEventListener('keyup', onShiftChange)
 
     return () => {
       eventTarget.removeEventListener('pointerdown', onPointerDown)
-      eventTarget.removeEventListener('pointermove', onPointerMove)
-      eventTarget.removeEventListener('pointerup', finishStroke)
-      eventTarget.removeEventListener('pointercancel', finishStroke)
+      window.removeEventListener('pointermove', onPointerMove)
+      window.removeEventListener('pointerup', finishStroke)
+      window.removeEventListener('pointercancel', finishStroke)
       window.removeEventListener('keydown', onShiftChange)
       window.removeEventListener('keyup', onShiftChange)
     }
   }, [enabled, eraserMode, width, height, surface, projectToPlane])
 
+  const skipInitialClearRef = useRef(true)
   useEffect(() => {
     if (clearTrigger === undefined) return
+    if (skipInitialClearRef.current) {
+      skipInitialClearRef.current = false
+      return
+    }
     const canvas = getCanvas()
     const ctx = ctxRef.current
     if (!canvas || !ctx) return
     ctx.globalCompositeOperation = 'source-over'
     ctx.clearRect(0, 0, canvas.width, canvas.height)
     setEraserMode(false)
-    setHasDrawn(false)
     drawingRef.current = false
     activePointerIdRef.current = null
     undoStackRef.current = []
     setUndoCount(0)
+    dismissDrawHint()
     notifyDraw()
   }, [clearTrigger, surface])
 
+  const skipInitialHintDismissRef = useRef(true)
   useEffect(() => {
-    if (!enabled || hasDrawn) {
+    if (dismissHintTrigger === undefined) return
+    if (skipInitialHintDismissRef.current) {
+      skipInitialHintDismissRef.current = false
+      return
+    }
+    dismissDrawHint()
+  }, [dismissHintTrigger])
+
+  useEffect(() => {
+    if (!enabled || hintDismissedRef.current) {
       setShowDrawHint(false)
       return
     }
-    const timeoutId = window.setTimeout(() => setShowDrawHint(true), DRAW_HINT_DELAY_MS)
+    const timeoutId = window.setTimeout(() => {
+      if (hintDismissedRef.current || drawingRef.current) return
+      setShowDrawHint(true)
+    }, DRAW_HINT_DELAY_MS)
     return () => window.clearTimeout(timeoutId)
-  }, [enabled, hasDrawn])
+  }, [enabled])
 
   useEffect(() => {
     if (!enabled) return
@@ -449,7 +567,7 @@ const DrawingCanvas = forwardRef<HTMLCanvasElement, Props>(function DrawingCanva
           )}
         </div>
       )}
-      {enabled && showDrawHint && !hasDrawn && (
+      {enabled && showDrawHint && (
         <div
           className="no-print draw-hint pointer-events-none absolute inset-0 flex items-center justify-center"
           style={{ zIndex: 20 }}

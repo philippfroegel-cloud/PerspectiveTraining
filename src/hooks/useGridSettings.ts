@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { shapes, type Shape } from '../shapes/shapes'
+import { IDENTITY_SHAPE_POSE, randomShapePose, type ShapePose } from '../utils/shapePose'
 
 export interface GridSettings {
   shapeIndex: number
@@ -7,6 +8,8 @@ export interface GridSettings {
   orientationSeed: number
   showShapeOnGrid: boolean
   drawingEnabled: boolean
+  randomPlacement: boolean
+  shapePose: ShapePose
 }
 
 export function useGridSettings() {
@@ -22,12 +25,18 @@ export function useGridSettings() {
     orientationSeed: Math.random(),
     showShapeOnGrid: false,
     drawingEnabled: true,
+    randomPlacement: false,
+    shapePose: IDENTITY_SHAPE_POSE,
   })
 
   const nextShape = () =>
     setSettings(s => {
       if (shapes.length === 0) return s
-      return { ...s, shapeIndex: (s.shapeIndex + 1) % shapes.length }
+      return {
+        ...s,
+        shapeIndex: (s.shapeIndex + 1) % shapes.length,
+        shapePose: s.randomPlacement ? randomShapePose() : s.shapePose,
+      }
     })
 
   const randomOrientation = () =>
@@ -39,6 +48,16 @@ export function useGridSettings() {
   const toggleShapeOnGrid = () =>
     setSettings(s => ({ ...s, showShapeOnGrid: !s.showShapeOnGrid }))
 
+  const toggleRandomPlacement = () =>
+    setSettings(s => {
+      const randomPlacement = !s.randomPlacement
+      return {
+        ...s,
+        randomPlacement,
+        shapePose: randomPlacement ? randomShapePose() : IDENTITY_SHAPE_POSE,
+      }
+    })
+
   return {
     settings,
     currentShape: shapes[settings.shapeIndex] ?? fallbackShape,
@@ -46,5 +65,6 @@ export function useGridSettings() {
     randomOrientation,
     setGridSize,
     toggleShapeOnGrid,
+    toggleRandomPlacement,
   }
 }

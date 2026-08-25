@@ -3,12 +3,14 @@ import * as THREE from 'three'
 import type { PerspectiveParams } from '../utils/perspective'
 import { applyCamera, applySheetSpin, projectPointerWithCamera, type ProjectPointerToPlane } from '../utils/planeProjection'
 import { acquireShapeTexture, getCachedShapeTexture } from '../utils/shapeTextures'
+import { IDENTITY_SHAPE_POSE, SHAPE_POSE_CANVAS_SIZE, drawPosedShape, type ShapePose } from '../utils/shapePose'
 
 interface Props {
   gridSize: number
   perspective: PerspectiveParams
   shapeImagePath?: string
   showShape?: boolean
+  shapePose?: ShapePose
   drawingCanvas?: HTMLCanvasElement | null
   projectPointerRef?: MutableRefObject<ProjectPointerToPlane | null>
 }
@@ -22,6 +24,9 @@ type SceneContext = {
   gridGroup: THREE.Group
   hitMesh: THREE.Mesh
   shapeOverlayMesh: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial> | null
+  sourceShapeTexture: THREE.Texture | null
+  shapePoseCanvas: HTMLCanvasElement | null
+  shapePoseTexture: THREE.CanvasTexture | null
   drawingOverlayMesh: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial> | null
   drawingTexture: THREE.CanvasTexture | null
   drawingCopyCanvas: HTMLCanvasElement | null
@@ -106,6 +111,10 @@ function buildGridGroup(gridSize: number): THREE.Group {
 function disposeShapeOverlay(ctx: SceneContext) {
   disposeOverlayMesh(ctx.shapeOverlayMesh)
   ctx.shapeOverlayMesh = null
+  ctx.shapePoseTexture?.dispose()
+  ctx.shapePoseTexture = null
+  ctx.shapePoseCanvas = null
+  ctx.sourceShapeTexture = null
 }
 
 function disposeDrawingOverlay(ctx: SceneContext) {
@@ -117,12 +126,30 @@ function setShapeOverlayTexture(
   ctx: SceneContext,
   texture: THREE.Texture,
   visible: boolean,
+  pose: ShapePose,
   options?: { alphaTest?: number },
 ) {
+  ctx.sourceShapeTexture = texture
+  let canvas = ctx.shapePoseCanvas
+  if (!canvas) {
+    canvas = document.createElement('canvas')
+    canvas.width = SHAPE_POSE_CANVAS_SIZE
+    canvas.height = SHAPE_POSE_CANVAS_SIZE
+    ctx.shapePoseCanvas = canvas
+  }
+  const canvasCtx = canvas.getContext('2d')
+  if (!canvasCtx || !texture.image) return
+  drawPosedShape(canvasCtx, texture.image, pose, SHAPE_POSE_CANVAS_SIZE)
+
   let mesh = ctx.shapeOverlayMesh
   if (!mesh) {
+    const poseTexture = new THREE.CanvasTexture(canvas)
+    poseTexture.minFilter = THREE.LinearFilter
+    poseTexture.magFilter = THREE.LinearFilter
+    poseTexture.colorSpace = THREE.SRGBColorSpace
+    ctx.shapePoseTexture = poseTexture
     const overlayMat = new THREE.MeshBasicMaterial({
-      map: texture,
+      map: poseTexture,
       transparent: true,
       opacity: 1,
       alphaTest: options?.alphaTest,
@@ -134,9 +161,9 @@ function setShapeOverlayTexture(
     mesh.position.z = -0.0006
     ctx.sheetGroup.add(mesh)
     ctx.shapeOverlayMesh = mesh
-  } else if (mesh.material.map !== texture) {
-    mesh.material.map = texture
-    mesh.material.alphaTest = options?.alphaTest ?? 0
+  } else if (ctx.shapePoseTexture) {
+    ctx.shapePoseTexture.needsUpdate = true
+    mesh.material.alphaTest = options?.alphaTest ?? mesh.material.alphaTest
     mesh.material.needsUpdate = true
   }
   mesh.visible = visible
@@ -223,6 +250,7 @@ export default function PerspectiveView({
   perspective,
   shapeImagePath = '',
   showShape = false,
+  shapePose = IDENTITY_SHAPE_POSE,
   drawingCanvas = null,
   projectPointerRef,
 }: Props) {
@@ -230,9 +258,11 @@ export default function PerspectiveView({
   const ctxRef = useRef<SceneContext | null>(null)
   const perspectiveRef = useRef(perspective)
   const showShapeRef = useRef(showShape)
+  const shapePoseRef = useRef(shapePose)
   const drawingCanvasRef = useRef(drawingCanvas)
   perspectiveRef.current = perspective
   showShapeRef.current = showShape
+  shapePoseRef.current = shapePose
   drawingCanvasRef.current = drawingCanvas
 
   // Create renderer/scene once; everything else updates in place.
@@ -294,6 +324,9 @@ export default function PerspectiveView({
       gridGroup,
       hitMesh,
       shapeOverlayMesh: null,
+      sourceShapeTexture: null,
+      shapePoseCanvas: null,
+      shapePoseTexture: null,
       drawingOverlayMesh: null,
       drawingTexture: null,
       drawingCopyCanvas: null,
@@ -366,14 +399,14 @@ export default function PerspectiveView({
 
     const cached = getCachedShapeTexture(shapeImagePath)
     if (cached) {
-      setShapeOverlayTexture(ctx, cached, showShapeRef.current, { alphaTest: 0.01 })
+      setShapeOverlayTexture(ctx, cached, showShapeRef.current, shapePoseRef.current, { alphaTest: 0.01 })
       return
     }
 
     return acquireShapeTexture(shapeImagePath, texture => {
       const liveCtx = ctxRef.current
       if (!liveCtx) return
-      setShapeOverlayTexture(liveCtx, texture, showShapeRef.current, { alphaTest: 0.01 })
+      setShapeOverlayTexture(liveCtx, texture, showShapeRef.current, shapePoseRef.current, { alphaTest: 0.01 })
     })
   }, [shapeImagePath])
 
@@ -381,6 +414,13 @@ export default function PerspectiveView({
     const mesh = ctxRef.current?.shapeOverlayMesh
     if (mesh) mesh.visible = showShape
   }, [showShape])
+
+  useEffect(() => {
+    const ctx = ctxRef.current
+    const source = ctx?.sourceShapeTexture
+    if (!ctx || !source) return
+    setShapeOverlayTexture(ctx, source, showShapeRef.current, shapePose, { alphaTest: 0.01 })
+  }, [shapePose])
 
   useEffect(() => {
     if (!projectPointerRef) return

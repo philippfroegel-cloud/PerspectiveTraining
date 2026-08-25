@@ -13,6 +13,12 @@ export type ProjectPointerToPlane = (
 
 const ndc = new THREE.Vector2()
 const raycaster = new THREE.Raycaster()
+const sheetPlane = new THREE.Plane()
+const sheetNormal = new THREE.Vector3()
+const sheetOrigin = new THREE.Vector3()
+const sheetHit = new THREE.Vector3()
+const sheetLocal = new THREE.Vector3()
+const sheetInverse = new THREE.Matrix4()
 
 export function applyCamera(
   camera: THREE.PerspectiveCamera,
@@ -54,12 +60,20 @@ export function projectPointerWithCamera(
   ndc.y = -((clientY - rect.top) / rect.height) * 2 + 1
   raycaster.setFromCamera(ndc, camera)
 
-  const hits = raycaster.intersectObject(hitObject, false)
-  const uv = hits[0]?.uv
-  if (!uv) return null
+  hitObject.updateWorldMatrix(true, false)
+  sheetInverse.copy(hitObject.matrixWorld).invert()
+  sheetNormal.set(0, 0, 1).transformDirection(hitObject.matrixWorld).normalize()
+  sheetOrigin.setFromMatrixPosition(hitObject.matrixWorld)
+  sheetPlane.setFromNormalAndCoplanarPoint(sheetNormal, sheetOrigin)
+
+  if (!raycaster.ray.intersectPlane(sheetPlane, sheetHit)) return null
+
+  sheetLocal.copy(sheetHit).applyMatrix4(sheetInverse)
+  const u = sheetLocal.x / (PLANE_HALF_SIZE * 2) + 0.5
+  const v = sheetLocal.y / (PLANE_HALF_SIZE * 2) + 0.5
 
   return {
-    x: uv.x * canvasWidth,
-    y: (1 - uv.y) * canvasHeight,
+    x: u * canvasWidth,
+    y: (1 - v) * canvasHeight,
   }
 }

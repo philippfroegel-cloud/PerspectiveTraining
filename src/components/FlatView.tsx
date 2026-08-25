@@ -1,17 +1,30 @@
 import { useId } from 'react'
 import { shapes, type Shape } from '../shapes/shapes'
+import { IDENTITY_SHAPE_POSE, type ShapePose } from '../utils/shapePose'
 
 interface Props {
   shape?: Shape
   gridSize: number
   showShape?: boolean
   gridOnly?: boolean
+  shapePose?: ShapePose
 }
 
-export default function FlatView({ shape, gridSize, showShape = false, gridOnly = false }: Props) {
+export default function FlatView({
+  shape,
+  gridSize,
+  showShape = false,
+  gridOnly = false,
+  shapePose = IDENTITY_SHAPE_POSE,
+}: Props) {
   const clipId = useId().replace(/:/g, '')
   const size = 500
   const cellSize = size / gridSize
+  const imageSize = size * shapePose.scale
+  const imageX = shapePose.cx * size - imageSize / 2
+  const imageY = (1 - shapePose.cy) * size - imageSize / 2
+  const rotateDeg = (shapePose.rotationRad * 180) / Math.PI
+  const rotateOrigin = `${shapePose.cx * size} ${(1 - shapePose.cy) * size}`
 
   const gridLines: React.ReactElement[] = []
 
@@ -48,23 +61,25 @@ export default function FlatView({ shape, gridSize, showShape = false, gridOnly 
           </clipPath>
         </defs>
 
-        {!gridOnly && shape && shapes.map(entry => {
-          const active = entry.imagePath === shape.imagePath
-          return (
-            <image
-              key={entry.id}
-              href={entry.imagePath}
-              x={0}
-              y={0}
-              width={size}
-              height={size}
-              preserveAspectRatio="xMidYMid meet"
-              clipPath={`url(#${clipId})`}
-              opacity={showShape && active ? 0.6 : 0}
-              visibility={active ? 'visible' : 'hidden'}
-            />
-          )
-        })}
+        <g clipPath={`url(#${clipId})`}>
+          {!gridOnly && shape && shapes.map(entry => {
+            const active = entry.imagePath === shape.imagePath
+            return (
+              <image
+                key={entry.id}
+                href={entry.imagePath}
+                x={imageX}
+                y={imageY}
+                width={imageSize}
+                height={imageSize}
+                preserveAspectRatio="xMidYMid meet"
+                transform={`rotate(${rotateDeg} ${rotateOrigin})`}
+                opacity={showShape && active ? 0.6 : 0}
+                visibility={active ? 'visible' : 'hidden'}
+              />
+            )
+          })}
+        </g>
         {gridLines}
         <line
           x1={0}

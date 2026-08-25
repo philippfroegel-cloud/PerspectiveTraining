@@ -25,6 +25,7 @@ export default function DrawPerspectiveMode() {
   const [rollRad, setRollRad] = useState(0)
   const [framingPadding, setFramingPadding] = useState(1.1)
   const [printImageDataUrl, setPrintImageDataUrl] = useState<string | null>(null)
+  const [hintDismissTrigger, setHintDismissTrigger] = useState(0)
 
   useEffect(() => {
     const drawTarget = drawAreaRef.current
@@ -163,7 +164,7 @@ export default function DrawPerspectiveMode() {
             </div>
           </div>
         </div>
-        <div className="relative flex-1 min-h-0 mx-4 mb-4 mt-2 flex items-center justify-center">
+        <div className="drawing-pointer-root relative flex-1 min-h-0 mx-4 mb-4 mt-2 flex items-center justify-center">
           <div ref={drawAreaRef} className="relative aspect-square h-full w-auto max-w-full">
             <FlatView gridSize={gridSize} gridOnly />
             <DrawingCanvas
@@ -172,6 +173,7 @@ export default function DrawPerspectiveMode() {
               width={drawAreaSize.width}
               height={drawAreaSize.height}
               onPrint={handlePrint}
+              dismissHintTrigger={hintDismissTrigger}
             />
           </div>
         </div>
@@ -182,7 +184,10 @@ export default function DrawPerspectiveMode() {
         <div className="no-print p-3 pt-2">
           <div className="flex flex-wrap items-center gap-3 bg-gray-50 border border-gray-200 rounded-lg p-3">
             <button
-              onClick={randomOrientation}
+              onClick={() => {
+                randomOrientation()
+                setHintDismissTrigger(n => n + 1)
+              }}
               className="px-3 py-2 rounded bg-gray-100 text-gray-700 hover:bg-gray-200 text-sm"
             >
               Next Perspective →

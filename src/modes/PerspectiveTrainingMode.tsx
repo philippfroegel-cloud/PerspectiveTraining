@@ -19,6 +19,7 @@ export default function PerspectiveTrainingMode() {
     randomOrientation,
     setGridSize,
     toggleShapeOnGrid,
+    toggleRandomPlacement,
   } = useGridSettings()
 
   const perspectiveAreaRef = useRef<HTMLDivElement>(null)
@@ -31,6 +32,10 @@ export default function PerspectiveTrainingMode() {
   const [fovDeg, setFovDeg] = useState(50)
   const [rollRad, setRollRad] = useState(0)
   const [framingPadding, setFramingPadding] = useState(1.1)
+  const [drawingClearTrigger, setDrawingClearTrigger] = useState(0)
+  const [hintDismissTrigger, setHintDismissTrigger] = useState(0)
+
+  const clearDrawing = () => setDrawingClearTrigger(n => n + 1)
 
   useEffect(() => {
     const target = perspectiveAreaRef.current
@@ -140,11 +145,30 @@ export default function PerspectiveTrainingMode() {
         <div className="no-print p-3 pt-2">
           <div className="flex flex-wrap items-end gap-3 bg-gray-50 border border-gray-200 rounded-lg p-3">
             <button
-              onClick={nextShape}
+              onClick={() => {
+                nextShape()
+                clearDrawing()
+              }}
               className="px-3 py-2 rounded bg-gray-100 text-gray-700 hover:bg-gray-200 text-sm"
             >
               Next Shape →
             </button>
+            <label className="flex items-center gap-2 cursor-pointer select-none">
+              <div
+                onClick={() => {
+                  toggleRandomPlacement()
+                  clearDrawing()
+                }}
+                className={`w-10 h-5 rounded-full transition-colors ${
+                  settings.randomPlacement ? 'bg-amber-500' : 'bg-gray-400'
+                }`}
+              >
+                <div className={`w-5 h-5 rounded-full bg-white shadow transition-transform ${
+                  settings.randomPlacement ? 'translate-x-5' : 'translate-x-0'
+                }`} />
+              </div>
+              <span className="text-sm text-gray-700">Random placement</span>
+            </label>
             <div className="min-w-52 flex-1">
               <p className="text-xs text-gray-400 uppercase tracking-wider mb-1 font-medium">
                 Grid cells — {settings.gridSize} × {settings.gridSize}
@@ -165,6 +189,7 @@ export default function PerspectiveTrainingMode() {
             shape={currentShape}
             gridSize={settings.gridSize}
             showShape={true}
+            shapePose={settings.shapePose}
           />
         </div>
       </div>
@@ -174,7 +199,10 @@ export default function PerspectiveTrainingMode() {
         <div className="no-print p-3 pt-2">
           <div className="flex flex-wrap items-center gap-3 bg-gray-50 border border-gray-200 rounded-lg p-3">
             <button
-              onClick={randomOrientation}
+              onClick={() => {
+                randomOrientation()
+                setHintDismissTrigger(n => n + 1)
+              }}
               className="px-3 py-2 rounded bg-gray-100 text-gray-700 hover:bg-gray-200 text-sm"
             >
               Next Perspective →
@@ -228,13 +256,14 @@ export default function PerspectiveTrainingMode() {
         <div
           id="print-area"
           ref={perspectiveAreaRef}
-          className="relative flex-1 min-h-0 overflow-hidden"
+          className="drawing-pointer-root relative flex-1 min-h-0 overflow-hidden"
         >
           <PerspectiveView
             gridSize={settings.gridSize}
             perspective={currentPerspective}
             shapeImagePath={currentShape.imagePath}
             showShape={settings.showShapeOnGrid}
+            shapePose={settings.shapePose}
             drawingCanvas={drawingSurface}
             projectPointerRef={projectPointerRef}
           />
@@ -245,6 +274,8 @@ export default function PerspectiveTrainingMode() {
             height={PLANE_CANVAS_SIZE}
             projectPointerRef={projectPointerRef}
             onPrint={handlePrint}
+            clearTrigger={drawingClearTrigger}
+            dismissHintTrigger={hintDismissTrigger}
           />
         </div>
         <img
