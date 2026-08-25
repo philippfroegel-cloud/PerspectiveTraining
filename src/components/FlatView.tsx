@@ -19,45 +19,46 @@ export default function FlatView({
 }: Props) {
   const clipId = useId().replace(/:/g, '')
   const size = 500
-  const cellSize = size / gridSize
-  const imageSize = size * shapePose.scale
-  const imageX = shapePose.cx * size - imageSize / 2
-  const imageY = (1 - shapePose.cy) * size - imageSize / 2
+  // Outer strokes are centered on the path. Inset so the right/bottom
+  // outlines are not clipped by viewBox 0 0 size size.
+  const gridOrigin = 1.5
+  const gridSpan = size - gridOrigin * 2
+  const cellSize = gridSpan / gridSize
+  const imageSize = gridSpan * shapePose.scale
+  const imageX = gridOrigin + shapePose.cx * gridSpan - imageSize / 2
+  const imageY = gridOrigin + (1 - shapePose.cy) * gridSpan - imageSize / 2
   const rotateDeg = (shapePose.rotationRad * 180) / Math.PI
-  const rotateOrigin = `${shapePose.cx * size} ${(1 - shapePose.cy) * size}`
+  const rotateOrigin = `${gridOrigin + shapePose.cx * gridSpan} ${gridOrigin + (1 - shapePose.cy) * gridSpan}`
+  const gridEnd = gridOrigin + gridSpan
 
   const gridLines: React.ReactElement[] = []
 
   for (let i = 0; i <= gridSize; i++) {
-    const x = i * cellSize
+    const x = gridOrigin + i * cellSize
     gridLines.push(
-      <line key={`v-${i}`} x1={x} y1={0} x2={x} y2={size}
+      <line key={`v-${i}`} x1={x} y1={gridOrigin} x2={x} y2={gridEnd}
         stroke="#d1d5db" strokeWidth={i === 0 || i === gridSize ? 1.5 : 0.75} />
     )
   }
 
   for (let i = 0; i <= gridSize; i++) {
-    const y = i * cellSize
+    const y = gridOrigin + i * cellSize
     gridLines.push(
-      <line key={`h-${i}`} x1={0} y1={y} x2={size} y2={y}
+      <line key={`h-${i}`} x1={gridOrigin} y1={y} x2={gridEnd} y2={y}
         stroke="#d1d5db" strokeWidth={i === 0 || i === gridSize ? 1.5 : 0.75} />
     )
   }
 
-  const viewBox = gridOnly
-    ? `0 0 ${size} ${size}`
-    : `-20 -20 ${size + 40} ${size + 40}`
-
   return (
-    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+    <div className="absolute inset-0 flex items-center justify-center pointer-events-none overflow-hidden">
       <svg
-        viewBox={viewBox}
+        viewBox={`0 0 ${size} ${size}`}
         className="w-full h-full"
         style={{ display: 'block', maxWidth: '100%', maxHeight: '100%' }}
       >
         <defs>
           <clipPath id={clipId}>
-            <rect x={0} y={0} width={size} height={size} />
+            <rect x={gridOrigin} y={gridOrigin} width={gridSpan} height={gridSpan} />
           </clipPath>
         </defs>
 
@@ -82,15 +83,15 @@ export default function FlatView({
         </g>
         {gridLines}
         <line
-          x1={0}
-          y1={size}
-          x2={size}
-          y2={size}
+          x1={gridOrigin}
+          y1={gridEnd}
+          x2={gridEnd}
+          y2={gridEnd}
           stroke="#4b5563"
           strokeWidth={2.5}
         />
         <polygon
-          points={`8,${size - 8} 28,${size - 8} 8,${size - 28}`}
+          points={`${gridOrigin + 8},${gridEnd - 8} ${gridOrigin + 28},${gridEnd - 8} ${gridOrigin + 8},${gridEnd - 28}`}
           fill="#4b5563"
         />
       </svg>

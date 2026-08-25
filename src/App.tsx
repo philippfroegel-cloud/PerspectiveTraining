@@ -3,14 +3,16 @@ import { shapes } from './shapes/shapes'
 import { prefetchShapeTextures } from './utils/shapeTextures'
 import PerspectiveTrainingMode from './modes/PerspectiveTrainingMode'
 import DrawPerspectiveMode from './modes/DrawPerspectiveMode'
+import CombinedMode from './modes/CombinedMode'
 
 prefetchShapeTextures(shapes.map(shape => shape.imagePath))
 
-type AppTab = 'training' | 'mode2'
+type AppTab = 'training' | 'mode2' | 'combined'
 
 const tabs: { id: AppTab; label: string }[] = [
   { id: 'training', label: 'Perspective map' },
   { id: 'mode2', label: 'Free drawing' },
+  { id: 'combined', label: 'Combined' },
 ]
 
 export default function App() {
@@ -69,11 +71,12 @@ export default function App() {
         <div className={activeTab === 'training' ? 'flex flex-1 flex-col min-h-0' : 'hidden'}>
           <PerspectiveTrainingMode />
         </div>
-        {activeTab === 'mode2' ? (
-          <div className="flex flex-1 flex-col min-h-0">
-            <DrawPerspectiveMode />
-          </div>
-        ) : null}
+        <div className={activeTab === 'mode2' ? 'flex flex-1 flex-col min-h-0' : 'hidden'}>
+          <DrawPerspectiveMode />
+        </div>
+        <div className={activeTab === 'combined' ? 'flex flex-1 flex-col min-h-0' : 'hidden'}>
+          <CombinedMode />
+        </div>
       </div>
     </div>
   )

@@ -13,6 +13,11 @@ export const SLIDER_FOV_MIN_DEG = 1
 export const SLIDER_FOV_MAX_DEG = 120
 export const RANDOM_AZIMUTH_MIN_DEG = 20
 export const RANDOM_AZIMUTH_MAX_DEG = 160
+export const INITIAL_AZIMUTH_DEG = 137
+export const INITIAL_ELEVATION_DEG = -52
+export const INITIAL_ROLL_DEG = 0
+export const INITIAL_FOV_DEG = 60
+export const INITIAL_FRAMING_PADDING = 1.1
 
 export function radiansToDegrees(rad: number): number {
   return (rad * 180) / Math.PI
@@ -87,4 +92,32 @@ export function getPerspectiveParams(seed: number, aspectRatio: number): Perspec
   const distance = computeFitDistance(aspectRatio, fov, framingPadding) / zoomScale
 
   return { azimuthRad, elevationRad, rollRad, distance, fov, framingPadding }
+}
+
+export interface CameraSliderState {
+  azimuthDeg: number
+  elevationDeg: number
+  fovDeg: number
+  rollRad: number
+  framingPadding: number
+}
+
+export function cameraSlidersFromSeed(seed: number | null): CameraSliderState {
+  if (seed === null) {
+    return {
+      azimuthDeg: INITIAL_AZIMUTH_DEG,
+      elevationDeg: INITIAL_ELEVATION_DEG,
+      fovDeg: INITIAL_FOV_DEG,
+      rollRad: degreesToRadians(INITIAL_ROLL_DEG),
+      framingPadding: INITIAL_FRAMING_PADDING,
+    }
+  }
+  const params = getPerspectiveParams(seed, 1)
+  return {
+    azimuthDeg: roundDegrees(params.azimuthRad),
+    elevationDeg: roundDegrees(params.elevationRad),
+    fovDeg: Math.round(params.fov),
+    rollRad: params.rollRad,
+    framingPadding: params.framingPadding,
+  }
 }

@@ -32,6 +32,18 @@ export function randomShapePose(): ShapePose {
   }
 }
 
+function sourceSize(image: CanvasImageSource) {
+  if (image instanceof HTMLImageElement) {
+    return { width: image.naturalWidth, height: image.naturalHeight }
+  }
+  if (image instanceof HTMLCanvasElement || image instanceof ImageBitmap) {
+    return { width: image.width, height: image.height }
+  }
+  const width = Number((image as { width?: number }).width ?? 0)
+  const height = Number((image as { height?: number }).height ?? 0)
+  return { width, height }
+}
+
 export function drawPosedShape(
   ctx: CanvasRenderingContext2D,
   image: CanvasImageSource,
@@ -40,10 +52,14 @@ export function drawPosedShape(
 ) {
   ctx.setTransform(1, 0, 0, 1, 0, 0)
   ctx.clearRect(0, 0, size, size)
-  const imageSize = size * pose.scale
+  const box = size * pose.scale
+  const { width, height } = sourceSize(image)
+  const fit = Math.min(box / Math.max(width, 1), box / Math.max(height, 1))
+  const drawWidth = width * fit
+  const drawHeight = height * fit
   ctx.save()
   ctx.translate(pose.cx * size, (1 - pose.cy) * size)
   ctx.rotate(pose.rotationRad)
-  ctx.drawImage(image, -imageSize / 2, -imageSize / 2, imageSize, imageSize)
+  ctx.drawImage(image, -drawWidth / 2, -drawHeight / 2, drawWidth, drawHeight)
   ctx.restore()
 }

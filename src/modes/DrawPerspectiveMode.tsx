@@ -3,7 +3,9 @@ import FlatView from '../components/FlatView'
 import PerspectiveView from '../components/PerspectiveView'
 import DrawingCanvas from '../components/DrawingCanvas'
 import LabeledRange from '../components/LabeledRange'
-import { applyFovWheelDelta, computeFitDistance, degreesToRadians, getPerspectiveParams, rollDegrees, roundDegrees, SLIDER_AZIMUTH_MAX_DEG, SLIDER_AZIMUTH_MIN_DEG, SLIDER_FOV_MAX_DEG, SLIDER_FOV_MIN_DEG } from '../utils/perspective'
+import { applyFovWheelDelta, cameraSlidersFromSeed, computeFitDistance, degreesToRadians, getPerspectiveParams, rollDegrees, roundDegrees, SLIDER_AZIMUTH_MAX_DEG, SLIDER_AZIMUTH_MIN_DEG, SLIDER_FOV_MAX_DEG, SLIDER_FOV_MIN_DEG } from '../utils/perspective'
+import { PLANE_CANVAS_SIZE, type ProjectPointerToPlane } from '../utils/planeProjection'
+import { initialOrientationSeed } from '../utils/firstLaunch'
 
 function createDrawingSurface() {
   return document.createElement('canvas')
@@ -12,66 +14,53 @@ function createDrawingSurface() {
 export default function DrawPerspectiveMode() {
   const drawingSurface = useMemo(() => createDrawingSurface(), [])
   const [gridSize, setGridSize] = useState(4)
-  const [orientationSeed, setOrientationSeed] = useState(Math.random())
+  const [orientationSeed, setOrientationSeed] = useState<number | null>(initialOrientationSeed)
 
-  const drawAreaRef = useRef<HTMLDivElement>(null)
-  const perspectiveAreaRef = useRef<HTMLDivElement>(null)
-  const [drawAreaSize, setDrawAreaSize] = useState({ width: 0, height: 0 })
+  const projectPointerRef = useRef<ProjectPointerToPlane | null>(null)
+  const [perspectiveNode, setPerspectiveNode] = useState<HTMLDivElement | null>(null)
+  const [planePointerHost, setPlanePointerHost] = useState<HTMLDivElement | null>(null)
+  const [drawingUiHost, setDrawingUiHost] = useState<HTMLDivElement | null>(null)
   const [perspectiveSize, setPerspectiveSize] = useState({ width: 0, height: 0 })
 
-  const [azimuthDeg, setAzimuthDeg] = useState(90)
-  const [elevationDeg, setElevationDeg] = useState(30)
-  const [fovDeg, setFovDeg] = useState(50)
-  const [rollRad, setRollRad] = useState(0)
-  const [framingPadding, setFramingPadding] = useState(1.1)
+  const startCamera = cameraSlidersFromSeed(orientationSeed)
+  const [azimuthDeg, setAzimuthDeg] = useState(startCamera.azimuthDeg)
+  const [elevationDeg, setElevationDeg] = useState(startCamera.elevationDeg)
+  const [fovDeg, setFovDeg] = useState(startCamera.fovDeg)
+  const [rollRad, setRollRad] = useState(startCamera.rollRad)
+  const [framingPadding, setFramingPadding] = useState(startCamera.framingPadding)
   const [printImageDataUrl, setPrintImageDataUrl] = useState<string | null>(null)
-  const [hintDismissTrigger, setHintDismissTrigger] = useState(0)
 
   useEffect(() => {
-    const drawTarget = drawAreaRef.current
-    const perspectiveTarget = perspectiveAreaRef.current
-    if (!drawTarget || !perspectiveTarget) return
+    if (!perspectiveNode) return
 
-    const updateDrawSize = () => {
-      const size = Math.min(drawTarget.clientWidth, drawTarget.clientHeight)
-      if (size <= 0) return
-      setDrawAreaSize({ width: size, height: size })
-    }
     const updatePerspectiveSize = () => {
       setPerspectiveSize({
-        width: perspectiveTarget.clientWidth,
-        height: perspectiveTarget.clientHeight,
+        width: perspectiveNode.clientWidth,
+        height: perspectiveNode.clientHeight,
       })
     }
 
-    updateDrawSize()
     updatePerspectiveSize()
 
-    const drawObserver = new ResizeObserver(updateDrawSize)
     const perspectiveObserver = new ResizeObserver(updatePerspectiveSize)
-    drawObserver.observe(drawTarget)
-    perspectiveObserver.observe(perspectiveTarget)
-    window.addEventListener('resize', updateDrawSize)
+    perspectiveObserver.observe(perspectiveNode)
     window.addEventListener('resize', updatePerspectiveSize)
 
     return () => {
-      drawObserver.disconnect()
       perspectiveObserver.disconnect()
-      window.removeEventListener('resize', updateDrawSize)
       window.removeEventListener('resize', updatePerspectiveSize)
     }
-  }, [])
+  }, [perspectiveNode])
 
   useEffect(() => {
-    const target = perspectiveAreaRef.current
-    if (!target) return
+    if (!perspectiveNode) return
     const onWheel = (event: WheelEvent) => {
       event.preventDefault()
       setFovDeg(current => applyFovWheelDelta(current, event.deltaY))
     }
-    target.addEventListener('wheel', onWheel, { passive: false })
-    return () => target.removeEventListener('wheel', onWheel)
-  }, [])
+    perspectiveNode.addEventListener('wheel', onWheel, { passive: false })
+    return () => perspectiveNode.removeEventListener('wheel', onWheel)
+  }, [perspectiveNode])
 
   const aspectForFraming =
     perspectiveSize.width > 0 && perspectiveSize.height > 0
@@ -79,6 +68,7 @@ export default function DrawPerspectiveMode() {
       : 1
 
   useEffect(() => {
+    if (orientationSeed === null) return
     const randomBase = getPerspectiveParams(orientationSeed, aspectForFraming)
     setAzimuthDeg(roundDegrees(randomBase.azimuthRad))
     setElevationDeg(roundDegrees(randomBase.elevationRad))
@@ -90,9 +80,8 @@ export default function DrawPerspectiveMode() {
   const randomOrientation = () => setOrientationSeed(Math.random())
 
   const capturePerspectiveSnapshot = (): string | null => {
-    const container = perspectiveAreaRef.current
-    if (!container) return null
-    const canvases = container.querySelectorAll('canvas')
+    if (!perspectiveNode) return null
+    const canvases = perspectiveNode.querySelectorAll('canvas')
     if (!canvases.length) return null
 
     const baseCanvas = canvases[0] as HTMLCanvasElement
@@ -115,7 +104,7 @@ export default function DrawPerspectiveMode() {
     }
     window.addEventListener('beforeprint', onBeforePrint)
     return () => window.removeEventListener('beforeprint', onBeforePrint)
-  }, [])
+  }, [perspectiveNode])
 
   const handlePrint = () => {
     const snapshot = capturePerspectiveSnapshot()
@@ -165,15 +154,19 @@ export default function DrawPerspectiveMode() {
           </div>
         </div>
         <div className="drawing-pointer-root relative flex-1 min-h-0 mx-4 mb-4 mt-2 flex items-center justify-center">
-          <div ref={drawAreaRef} className="relative aspect-square h-full w-auto max-w-full">
+          <div className="relative aspect-square h-full w-auto max-w-full">
             <FlatView gridSize={gridSize} gridOnly />
             <DrawingCanvas
               surface={drawingSurface}
               enabled
-              width={drawAreaSize.width}
-              height={drawAreaSize.height}
+              width={PLANE_CANVAS_SIZE}
+              height={PLANE_CANVAS_SIZE}
+              displaySurface
+              projectPointerRef={projectPointerRef}
+              projectEventRoot={planePointerHost}
+              uiPortal={drawingUiHost}
               onPrint={handlePrint}
-              dismissHintTrigger={hintDismissTrigger}
+              showHint={false}
             />
           </div>
         </div>
@@ -184,10 +177,7 @@ export default function DrawPerspectiveMode() {
         <div className="no-print p-3 pt-2">
           <div className="flex flex-wrap items-center gap-3 bg-gray-50 border border-gray-200 rounded-lg p-3">
             <button
-              onClick={() => {
-                randomOrientation()
-                setHintDismissTrigger(n => n + 1)
-              }}
+              onClick={randomOrientation}
               className="px-3 py-2 rounded bg-gray-100 text-gray-700 hover:bg-gray-200 text-sm"
             >
               Next Perspective →
@@ -225,11 +215,24 @@ export default function DrawPerspectiveMode() {
           </div>
         </div>
 
-        <div ref={perspectiveAreaRef} className="print-area relative flex-1 min-h-0 overflow-hidden">
+        <div
+          ref={setPerspectiveNode}
+          className="drawing-pointer-root print-area relative flex-1 min-h-0 overflow-hidden"
+        >
           <PerspectiveView
             gridSize={gridSize}
             perspective={currentPerspective}
             drawingCanvas={drawingSurface}
+            projectPointerRef={projectPointerRef}
+          />
+          <div
+            ref={setPlanePointerHost}
+            className="drawing-pointer-root absolute inset-0 z-10"
+            style={{ touchAction: 'none' }}
+          />
+          <div
+            ref={setDrawingUiHost}
+            className="no-print pointer-events-none absolute inset-0 z-20"
           />
         </div>
         <img

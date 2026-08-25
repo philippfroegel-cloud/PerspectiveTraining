@@ -1,11 +1,12 @@
 import { useState } from 'react'
 import { shapes, type Shape } from '../shapes/shapes'
+import { initialOrientationSeed } from '../utils/firstLaunch'
 import { IDENTITY_SHAPE_POSE, randomShapePose, type ShapePose } from '../utils/shapePose'
 
 export interface GridSettings {
   shapeIndex: number
   gridSize: number
-  orientationSeed: number
+  orientationSeed: number | null
   showShapeOnGrid: boolean
   drawingEnabled: boolean
   randomPlacement: boolean
@@ -22,7 +23,7 @@ export function useGridSettings() {
   const [settings, setSettings] = useState<GridSettings>({
     shapeIndex: 0,
     gridSize: 4,
-    orientationSeed: Math.random(),
+    orientationSeed: initialOrientationSeed(),
     showShapeOnGrid: false,
     drawingEnabled: true,
     randomPlacement: false,

@@ -4,9 +4,10 @@ interface Props {
   min: number
   max: number
   onChange: (value: number) => void
+  compact?: boolean
 }
 
-export default function LabeledRange({ label, value, min, max, onChange }: Props) {
+export default function LabeledRange({ label, value, min, max, onChange, compact = false }: Props) {
   return (
     <label
       style={{
@@ -14,7 +15,7 @@ export default function LabeledRange({ label, value, min, max, onChange }: Props
         gridTemplateColumns: 'minmax(0, 1fr) 5.5ch',
         gridTemplateRows: 'auto auto',
         columnGap: 8,
-        rowGap: 4,
+        rowGap: compact ? 3 : 4,
         minWidth: 0,
         width: '100%',
         alignItems: 'baseline',
@@ -28,6 +29,7 @@ export default function LabeledRange({ label, value, min, max, onChange }: Props
           color: '#6b7280',
           fontWeight: 500,
           whiteSpace: 'nowrap',
+          lineHeight: 1,
         }}
       >
         {label}
@@ -40,6 +42,7 @@ export default function LabeledRange({ label, value, min, max, onChange }: Props
           color: '#6b7280',
           whiteSpace: 'nowrap',
           letterSpacing: '0.05em',
+          lineHeight: 1,
         }}
       >
         {value}°
@@ -51,7 +54,13 @@ export default function LabeledRange({ label, value, min, max, onChange }: Props
         value={value}
         onChange={e => onChange(Number(e.target.value))}
         className="accent-amber-500"
-        style={{ gridColumn: '1 / -1', width: '100%', minWidth: 0, margin: 0 }}
+        style={{
+          gridColumn: '1 / -1',
+          width: '100%',
+          minWidth: 0,
+          margin: 0,
+          ['--range-progress' as string]: `${max === min ? 0 : ((value - min) / (max - min)) * 100}%`,
+        }}
       />
     </label>
   )

@@ -13,6 +13,7 @@ interface Props {
   shapePose?: ShapePose
   drawingCanvas?: HTMLCanvasElement | null
   projectPointerRef?: MutableRefObject<ProjectPointerToPlane | null>
+  showDrawing?: boolean
 }
 
 type SceneContext = {
@@ -240,9 +241,6 @@ function syncDrawingOverlay(ctx: SceneContext, sourceCanvas: HTMLCanvasElement) 
   }
 
   ctx.drawingTexture.needsUpdate = true
-  if (ctx.drawingOverlayMesh) {
-    ctx.drawingOverlayMesh.visible = true
-  }
 }
 
 export default function PerspectiveView({
@@ -253,6 +251,7 @@ export default function PerspectiveView({
   shapePose = IDENTITY_SHAPE_POSE,
   drawingCanvas = null,
   projectPointerRef,
+  showDrawing = true,
 }: Props) {
   const mountRef = useRef<HTMLDivElement>(null)
   const ctxRef = useRef<SceneContext | null>(null)
@@ -260,10 +259,12 @@ export default function PerspectiveView({
   const showShapeRef = useRef(showShape)
   const shapePoseRef = useRef(shapePose)
   const drawingCanvasRef = useRef(drawingCanvas)
+  const showDrawingRef = useRef(showDrawing)
   perspectiveRef.current = perspective
   showShapeRef.current = showShape
   shapePoseRef.current = shapePose
   drawingCanvasRef.current = drawingCanvas
+  showDrawingRef.current = showDrawing
 
   // Create renderer/scene once; everything else updates in place.
   useEffect(() => {
@@ -293,6 +294,7 @@ export default function PerspectiveView({
     renderer.domElement.style.display = 'block'
     renderer.domElement.style.width = '100%'
     renderer.domElement.style.height = '100%'
+    renderer.domElement.style.cursor = 'inherit'
 
     const syncViewport = () => {
       const w = mount.clientWidth
@@ -339,6 +341,9 @@ export default function PerspectiveView({
       const canvas = drawingCanvasRef.current
       if (canvas && canvas.width > 0 && canvas.height > 0) {
         syncDrawingOverlay(ctx, canvas)
+      }
+      if (ctx.drawingOverlayMesh) {
+        ctx.drawingOverlayMesh.visible = Boolean(showDrawingRef.current && canvas && canvas.width > 0)
       }
       renderer.render(scene, camera)
     }
@@ -414,6 +419,11 @@ export default function PerspectiveView({
     const mesh = ctxRef.current?.shapeOverlayMesh
     if (mesh) mesh.visible = showShape
   }, [showShape])
+
+  useEffect(() => {
+    const mesh = ctxRef.current?.drawingOverlayMesh
+    if (mesh) mesh.visible = showDrawing
+  }, [showDrawing])
 
   useEffect(() => {
     const ctx = ctxRef.current

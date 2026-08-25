@@ -4,7 +4,7 @@ import FlatView from '../components/FlatView'
 import PerspectiveView from '../components/PerspectiveView'
 import DrawingCanvas from '../components/DrawingCanvas'
 import LabeledRange from '../components/LabeledRange'
-import { applyFovWheelDelta, computeFitDistance, degreesToRadians, getPerspectiveParams, rollDegrees, roundDegrees, SLIDER_AZIMUTH_MAX_DEG, SLIDER_AZIMUTH_MIN_DEG, SLIDER_FOV_MAX_DEG, SLIDER_FOV_MIN_DEG } from '../utils/perspective'
+import { applyFovWheelDelta, cameraSlidersFromSeed, computeFitDistance, degreesToRadians, getPerspectiveParams, rollDegrees, roundDegrees, SLIDER_AZIMUTH_MAX_DEG, SLIDER_AZIMUTH_MIN_DEG, SLIDER_FOV_MAX_DEG, SLIDER_FOV_MIN_DEG } from '../utils/perspective'
 import { PLANE_CANVAS_SIZE, type ProjectPointerToPlane } from '../utils/planeProjection'
 
 function createDrawingSurface() {
@@ -27,11 +27,12 @@ export default function PerspectiveTrainingMode() {
   const projectPointerRef = useRef<ProjectPointerToPlane | null>(null)
   const [perspectiveSize, setPerspectiveSize] = useState({ width: 0, height: 0 })
   const [printImageDataUrl, setPrintImageDataUrl] = useState<string | null>(null)
-  const [azimuthDeg, setAzimuthDeg] = useState(90)
-  const [elevationDeg, setElevationDeg] = useState(30)
-  const [fovDeg, setFovDeg] = useState(50)
-  const [rollRad, setRollRad] = useState(0)
-  const [framingPadding, setFramingPadding] = useState(1.1)
+  const startCamera = cameraSlidersFromSeed(settings.orientationSeed)
+  const [azimuthDeg, setAzimuthDeg] = useState(startCamera.azimuthDeg)
+  const [elevationDeg, setElevationDeg] = useState(startCamera.elevationDeg)
+  const [fovDeg, setFovDeg] = useState(startCamera.fovDeg)
+  const [rollRad, setRollRad] = useState(startCamera.rollRad)
+  const [framingPadding, setFramingPadding] = useState(startCamera.framingPadding)
   const [drawingClearTrigger, setDrawingClearTrigger] = useState(0)
   const [hintDismissTrigger, setHintDismissTrigger] = useState(0)
 
@@ -76,6 +77,7 @@ export default function PerspectiveTrainingMode() {
       : 1
 
   useEffect(() => {
+    if (settings.orientationSeed === null) return
     const randomBase = getPerspectiveParams(settings.orientationSeed, aspectForDebug)
     setAzimuthDeg(roundDegrees(randomBase.azimuthRad))
     setElevationDeg(roundDegrees(randomBase.elevationRad))
