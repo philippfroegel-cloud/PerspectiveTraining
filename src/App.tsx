@@ -1,23 +1,10 @@
-import { useState } from 'react'
 import { shapes } from './shapes/shapes'
 import { prefetchShapeTextures } from './utils/shapeTextures'
-import PerspectiveTrainingMode from './modes/PerspectiveTrainingMode'
-import DrawPerspectiveMode from './modes/DrawPerspectiveMode'
 import CombinedMode from './modes/CombinedMode'
 
 prefetchShapeTextures(shapes.map(shape => shape.imagePath))
 
-type AppTab = 'training' | 'mode2' | 'combined'
-
-const tabs: { id: AppTab; label: string }[] = [
-  { id: 'training', label: 'Perspective map' },
-  { id: 'mode2', label: 'Free drawing' },
-  { id: 'combined', label: 'Combined' },
-]
-
 export default function App() {
-  const [activeTab, setActiveTab] = useState<AppTab>('training')
-
   return (
     <div className="flex flex-col h-screen bg-gray-50">
       <header className="no-print flex items-center gap-6 px-6 py-3 bg-white border-b border-gray-200">
@@ -30,26 +17,6 @@ export default function App() {
             Perspective Training
           </h1>
         </div>
-
-        <nav className="flex gap-1 rounded-lg bg-gray-100 p-1">
-          {tabs.map(tab => {
-            const active = activeTab === tab.id
-            return (
-              <button
-                key={tab.id}
-                type="button"
-                onClick={() => setActiveTab(tab.id)}
-                className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                  active
-                    ? 'bg-white text-gray-800 shadow-sm'
-                    : 'text-gray-500 hover:text-gray-700'
-                }`}
-              >
-                {tab.label}
-              </button>
-            )
-          })}
-        </nav>
 
         <p className="ml-auto shrink-0 text-sm text-gray-500">
           Philipp Frögel
@@ -68,15 +35,7 @@ export default function App() {
       </header>
 
       <div className="flex flex-1 flex-col min-h-0">
-        <div className={activeTab === 'training' ? 'flex flex-1 flex-col min-h-0' : 'hidden'}>
-          <PerspectiveTrainingMode />
-        </div>
-        <div className={activeTab === 'mode2' ? 'flex flex-1 flex-col min-h-0' : 'hidden'}>
-          <DrawPerspectiveMode />
-        </div>
-        <div className={activeTab === 'combined' ? 'flex flex-1 flex-col min-h-0' : 'hidden'}>
-          <CombinedMode />
-        </div>
+        <CombinedMode />
       </div>
     </div>
   )

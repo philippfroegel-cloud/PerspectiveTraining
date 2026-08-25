@@ -275,7 +275,7 @@ export default function CombinedMode() {
               uiPortal={drawingUiHost}
               hintPortal={hintHost}
               hintTitle="Draw on the grids."
-              hintNote="Turn on or off what you want to see."
+              hintNote="Turn on/off what you want to see."
               showLocalToolbar={false}
               toolbarVariant="box"
               onPrint={handlePrint}
