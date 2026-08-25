@@ -75,7 +75,7 @@ export default function FlatView({
                 height={imageSize}
                 preserveAspectRatio="xMidYMid meet"
                 transform={`rotate(${rotateDeg} ${rotateOrigin})`}
-                opacity={showShape && active ? 0.6 : 0}
+                opacity={showShape && active ? 1 : 0}
                 visibility={active ? 'visible' : 'hidden'}
               />
             )
