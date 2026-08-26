@@ -72,6 +72,7 @@ function clipLineToGrid(
     }
     return true
   }
+  if (!Number.isFinite(dx) || !Number.isFinite(dy)) return null
   if (!clip(-dx, a.x) || !clip(dx, width - a.x) || !clip(-dy, a.y) || !clip(dy, height - a.y)) {
     return null
   }
@@ -457,7 +458,9 @@ const DrawingCanvas = forwardRef<HTMLCanvasElement, Props>(function DrawingCanva
 
       pointerSpaceRef.current = space
       const mapped = toDrawPoint(pointerEvent.clientX, pointerEvent.clientY, space)
-      if (!mapped) return
+      // In the 3D view a press can miss the sheet (empty background). Still
+      // start the stroke so later motion can clip onto the grid.
+      if (space !== 'plane' && !mapped) return
 
       pointerEvent.preventDefault()
       hintDismissedRef.current = true
@@ -474,49 +477,58 @@ const DrawingCanvas = forwardRef<HTMLCanvasElement, Props>(function DrawingCanva
         event.currentTarget.setPointerCapture(pointerEvent.pointerId)
         pointerCaptureTargetRef.current = event.currentTarget
       }
-      strokePointsRef.current = [mapped]
+      strokePointsRef.current = mapped ? [mapped] : []
       redrawActiveStroke(pointerEvent.shiftKey)
+    }
+
+    const pushStrokePoint = (point: { x: number; y: number }) => {
+      if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) return false
+      const points = strokePointsRef.current
+      const last = points[points.length - 1]
+      if (last && last.x === point.x && last.y === point.y) return false
+      points.push(point)
+      return true
     }
 
     const appendMappedPoint = (clientX: number, clientY: number) => {
       const space = pointerSpaceRef.current
-      const mapped = toDrawPoint(clientX, clientY, space)
-      if (!mapped) return false
 
-      const points = strokePointsRef.current
-      const last = points[points.length - 1]
-      if (last && last.x === mapped.x && last.y === mapped.y) {
+      if (space === 'plane') {
+        // Sample the screen segment so a drag that begins in empty 3D space
+        // (ray misses the sheet) still records plane hits as it crosses the
+        // paper. When both ends hit, also densify by canvas distance so a
+        // receding plane does not skip the grid. Shift-straight uses first
+        // and last hits.
+        const screenDist = Math.hypot(clientX - lastClientX, clientY - lastClientY)
+        let steps = Math.max(1, Math.min(96, Math.ceil(screenDist / 4) || 1))
+        const mappedEnd = toDrawPoint(clientX, clientY, 'plane')
+        const last = strokePointsRef.current[strokePointsRef.current.length - 1]
+        if (mappedEnd && last) {
+          const canvasDist = Math.hypot(mappedEnd.x - last.x, mappedEnd.y - last.y)
+          const maxStep = Math.max(PEN_SIZE, 6)
+          steps = Math.max(steps, Math.min(96, Math.ceil(canvasDist / maxStep)))
+        }
+        let added = false
+        for (let i = 1; i <= steps; i++) {
+          const t = i / steps
+          const sample = toDrawPoint(
+            lastClientX + (clientX - lastClientX) * t,
+            lastClientY + (clientY - lastClientY) * t,
+            'plane',
+          )
+          if (sample && pushStrokePoint(sample)) added = true
+        }
         lastClientX = clientX
         lastClientY = clientY
-        return false
+        return added
       }
 
-      // Far on a receding plane, a few screen pixels jump a long way on the
-      // shared 2D bitmap. Sample along the screen segment so the polyline stays connected.
-      if (space === 'plane' && last) {
-        const canvasDist = Math.hypot(mapped.x - last.x, mapped.y - last.y)
-        const maxStep = Math.max(PEN_SIZE, 6)
-        if (canvasDist > maxStep) {
-          const steps = Math.min(64, Math.ceil(canvasDist / maxStep))
-          for (let i = 1; i < steps; i++) {
-            const t = i / steps
-            const sample = toDrawPoint(
-              lastClientX + (clientX - lastClientX) * t,
-              lastClientY + (clientY - lastClientY) * t,
-              'plane',
-            )
-            if (!sample) continue
-            const prev = points[points.length - 1]
-            if (prev && prev.x === sample.x && prev.y === sample.y) continue
-            points.push(sample)
-          }
-        }
-      }
-
-      points.push(mapped)
+      const mapped = toDrawPoint(clientX, clientY, space)
+      if (!mapped) return false
+      const added = pushStrokePoint(mapped)
       lastClientX = clientX
       lastClientY = clientY
-      return true
+      return added
     }
 
     const onPointerMove = (event: Event) => {
