@@ -66,6 +66,19 @@ export default function CombinedMode() {
   const [showShapeRight, setShowShapeRight] = useState(false)
   const [showDrawingLeft, setShowDrawingLeft] = useState(true)
   const [showDrawingRight, setShowDrawingRight] = useState(true)
+  const [flatRotationDeg, setFlatRotationDeg] = useState(0)
+  const [perspectiveLocks, setPerspectiveLocks] = useState({
+    azimuth: false,
+    elevation: false,
+    spin: false,
+    fov: false,
+  })
+  const perspectiveLocksRef = useRef(perspectiveLocks)
+  perspectiveLocksRef.current = perspectiveLocks
+
+  const togglePerspectiveLock = (key: keyof typeof perspectiveLocks) => {
+    setPerspectiveLocks(current => ({ ...current, [key]: !current[key] }))
+  }
 
   const clearDrawing = () => setDrawingClearTrigger(n => n + 1)
 
@@ -108,10 +121,11 @@ export default function CombinedMode() {
   useEffect(() => {
     if (settings.orientationSeed === null) return
     const randomBase = getPerspectiveParams(settings.orientationSeed, aspectForFraming)
-    setAzimuthDeg(roundDegrees(randomBase.azimuthRad))
-    setElevationDeg(roundDegrees(randomBase.elevationRad))
-    setFovDeg(Math.round(randomBase.fov))
-    setRollRad(randomBase.rollRad)
+    const locks = perspectiveLocksRef.current
+    if (!locks.azimuth) setAzimuthDeg(roundDegrees(randomBase.azimuthRad))
+    if (!locks.elevation) setElevationDeg(roundDegrees(randomBase.elevationRad))
+    if (!locks.spin) setRollRad(randomBase.rollRad)
+    if (!locks.fov) setFovDeg(Math.round(randomBase.fov))
     setFramingPadding(randomBase.framingPadding)
   }, [settings.orientationSeed])
 
@@ -255,32 +269,61 @@ export default function CombinedMode() {
           </div>
       </div>
       <div className="col-start-1 row-start-2 flex min-h-0 flex-col overflow-hidden rounded-b-xl border border-t-0 border-gray-200 bg-white px-3 pt-1 pb-2">
-        <div className="drawing-pointer-root relative flex min-h-0 flex-1 items-center justify-center">
-          <div className="relative aspect-square h-full w-auto max-w-full overflow-hidden">
-            <FlatView
-              shape={currentShape}
-              gridSize={settings.gridSize}
-              showShape={showShapeLeft}
-              shapePose={settings.shapePose}
-            />
-            <DrawingCanvas
-              surface={drawingSurface}
-              enabled
-              width={PLANE_CANVAS_SIZE}
-              height={PLANE_CANVAS_SIZE}
-              displaySurface
-              inkVisible={showDrawingLeft}
-              projectPointerRef={projectPointerRef}
-              projectEventRoot={planePointerHost}
-              uiPortal={drawingUiHost}
-              hintPortal={hintHost}
-              hintTitle="Draw on the grids."
-              hintNote="Turn on/off what you want to see."
-              showLocalToolbar={false}
-              toolbarVariant="box"
-              onPrint={handlePrint}
-              clearTrigger={drawingClearTrigger}
-            />
+        <div className="drawing-pointer-root relative flex min-h-0 flex-1 items-end justify-center">
+          <button
+            type="button"
+            title="Rotate paper 90°"
+            aria-label="Rotate paper 90 degrees"
+            data-drawing-ui
+            className="no-print z-20 mb-0 mr-1 shrink-0 border-0 bg-transparent p-1 text-gray-500 shadow-none hover:text-gray-800"
+            onPointerDown={event => event.stopPropagation()}
+            onClick={() => setFlatRotationDeg(deg => (deg + 90) % 360)}
+          >
+            <svg
+              viewBox="0 0 24 24"
+              className="h-8 w-8 overflow-visible"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" />
+              <path d="M21 3v5h-5" />
+            </svg>
+          </button>
+          <div className="relative aspect-square h-full w-auto max-w-[calc(100%-2.75rem)] overflow-hidden">
+            <div
+              className="absolute inset-0 origin-center"
+              style={{ transform: `rotate(${flatRotationDeg}deg)` }}
+            >
+              <FlatView
+                shape={currentShape}
+                gridSize={settings.gridSize}
+                showShape={showShapeLeft}
+                shapePose={settings.shapePose}
+              />
+              <DrawingCanvas
+                surface={drawingSurface}
+                enabled
+                width={PLANE_CANVAS_SIZE}
+                height={PLANE_CANVAS_SIZE}
+                displaySurface
+                inkVisible={showDrawingLeft}
+                displayRotationDeg={flatRotationDeg}
+                projectPointerRef={projectPointerRef}
+                projectEventRoot={planePointerHost}
+                uiPortal={drawingUiHost}
+                hintPortal={hintHost}
+                hintTitle="Draw on the grids."
+                hintNote="Turn on/off what you want to see."
+                showLocalToolbar={false}
+                toolbarVariant="box"
+                onPrint={handlePrint}
+                clearTrigger={drawingClearTrigger}
+              />
+            </div>
           </div>
         </div>
       </div>
@@ -313,6 +356,8 @@ export default function CombinedMode() {
                 min={SLIDER_AZIMUTH_MIN_DEG}
                 max={SLIDER_AZIMUTH_MAX_DEG}
                 onChange={value => setAzimuthDeg(value)}
+                locked={perspectiveLocks.azimuth}
+                onToggleLock={() => togglePerspectiveLock('azimuth')}
               />
               <LabeledRange
                 compact
@@ -321,6 +366,8 @@ export default function CombinedMode() {
                 min={-90}
                 max={90}
                 onChange={value => setElevationDeg(value)}
+                locked={perspectiveLocks.elevation}
+                onToggleLock={() => togglePerspectiveLock('elevation')}
               />
               <LabeledRange
                 compact
@@ -329,6 +376,8 @@ export default function CombinedMode() {
                 min={0}
                 max={359}
                 onChange={value => setRollRad(degreesToRadians(value))}
+                locked={perspectiveLocks.spin}
+                onToggleLock={() => togglePerspectiveLock('spin')}
               />
               <LabeledRange
                 compact
@@ -337,6 +386,8 @@ export default function CombinedMode() {
                 min={SLIDER_FOV_MIN_DEG}
                 max={SLIDER_FOV_MAX_DEG}
                 onChange={value => setFovDeg(value)}
+                locked={perspectiveLocks.fov}
+                onToggleLock={() => togglePerspectiveLock('fov')}
               />
             </div>
           </div>

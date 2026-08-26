@@ -24,6 +24,31 @@ function isInsideGrid(point: { x: number; y: number }, width: number, height: nu
   return point.x >= 0 && point.x <= width && point.y >= 0 && point.y <= height
 }
 
+/** Map a point from the rotated 2D display back onto the unrotated canvas. */
+function mapDisplayPointToCanvas(
+  visualX: number,
+  visualY: number,
+  canvasWidth: number,
+  canvasHeight: number,
+  rotationDeg: number,
+) {
+  const turns = ((rotationDeg % 360) + 360) % 360
+  const cx = canvasWidth / 2
+  const cy = canvasHeight / 2
+  const dx = visualX - cx
+  const dy = visualY - cy
+  switch (turns) {
+    case 90:
+      return { x: cx + dy, y: cy - dx }
+    case 180:
+      return { x: cx - dx, y: cy - dy }
+    case 270:
+      return { x: cx - dy, y: cy + dx }
+    default:
+      return { x: visualX, y: visualY }
+  }
+}
+
 /** Liang–Barsky clip of a segment to the grid rectangle. */
 function clipLineToGrid(
   a: { x: number; y: number },
@@ -94,6 +119,8 @@ interface Props {
   onPrint?: () => void
   onDraw?: () => void
   showPrint?: boolean
+  /** Clockwise display rotation of the 2D paper; canvas bitmap stays unrotated. */
+  displayRotationDeg?: number
 }
 
 function ToolGlyph({ children }: { children: ReactNode }) {
@@ -127,6 +154,7 @@ const DrawingCanvas = forwardRef<HTMLCanvasElement, Props>(function DrawingCanva
     onPrint,
     onDraw,
     showPrint = true,
+    displayRotationDeg = 0,
   },
   ref,
 ) {
@@ -142,6 +170,7 @@ const DrawingCanvas = forwardRef<HTMLCanvasElement, Props>(function DrawingCanva
   const strokeDrewRef = useRef(false)
   const undoStackRef = useRef<HTMLCanvasElement[]>([])
   const onDrawRef = useRef(onDraw)
+  const displayRotationDegRef = useRef(displayRotationDeg)
   const eraserModeRef = useRef(false)
   const [eraserMode, setEraserMode] = useState(false)
   const [undoCount, setUndoCount] = useState(0)
@@ -154,6 +183,7 @@ const DrawingCanvas = forwardRef<HTMLCanvasElement, Props>(function DrawingCanva
   }
 
   onDrawRef.current = onDraw
+  displayRotationDegRef.current = displayRotationDeg
   eraserModeRef.current = eraserMode
   const usesPlaneProjection = Boolean(projectPointerRef)
   const hideSurface = displaySurface === undefined ? usesPlaneProjection : !displaySurface
@@ -243,10 +273,13 @@ const DrawingCanvas = forwardRef<HTMLCanvasElement, Props>(function DrawingCanva
     if (rect.width <= 0 || rect.height <= 0) return null
     const scaleX = canvas.width / rect.width
     const scaleY = canvas.height / rect.height
-    return {
-      x: (clientX - rect.left) * scaleX,
-      y: (clientY - rect.top) * scaleY,
-    }
+    return mapDisplayPointToCanvas(
+      (clientX - rect.left) * scaleX,
+      (clientY - rect.top) * scaleY,
+      canvas.width,
+      canvas.height,
+      displayRotationDegRef.current,
+    )
   }
 
   const applyBrushStyle = () => {
