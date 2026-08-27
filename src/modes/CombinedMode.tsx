@@ -269,7 +269,8 @@ export default function CombinedMode() {
           </div>
       </div>
       <div className="col-start-1 row-start-2 flex min-h-0 flex-col overflow-hidden rounded-b-xl border border-t-0 border-gray-200 bg-white px-3 pt-1 pb-2">
-        <div className="drawing-pointer-root relative flex min-h-0 flex-1 items-end justify-center">
+        <div className="drawing-pointer-root relative flex min-h-0 flex-1 items-center justify-center [container-type:size]">
+          <div className="flex items-end">
           <button
             type="button"
             title="Rotate paper 90°"
@@ -293,10 +294,9 @@ export default function CombinedMode() {
               <path d="M21 3v5h-5" />
             </svg>
           </button>
-          <div className="relative min-h-0 min-w-0 flex-1 self-stretch [container-type:size]">
             <div
-              className="absolute bottom-0 left-1/2 aspect-square -translate-x-1/2 overflow-hidden"
-              style={{ width: 'min(100%, 100cqh)' }}
+              className="relative aspect-square overflow-hidden"
+              style={{ width: 'min(calc(100cqw - 2.75rem), 100cqh)' }}
             >
               <div
                 className="absolute inset-0 origin-center"
