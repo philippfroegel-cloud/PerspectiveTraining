@@ -293,11 +293,15 @@ export default function CombinedMode() {
               <path d="M21 3v5h-5" />
             </svg>
           </button>
-          <div className="relative aspect-square h-full w-auto max-w-[calc(100%-2.75rem)] overflow-hidden">
+          <div className="relative min-h-0 min-w-0 flex-1 self-stretch [container-type:size]">
             <div
-              className="absolute inset-0 origin-center"
-              style={{ transform: `rotate(${flatRotationDeg}deg)` }}
+              className="absolute bottom-0 left-1/2 aspect-square -translate-x-1/2 overflow-hidden"
+              style={{ width: 'min(100%, 100cqh)' }}
             >
+              <div
+                className="absolute inset-0 origin-center"
+                style={{ transform: `rotate(${flatRotationDeg}deg)` }}
+              >
               <FlatView
                 shape={currentShape}
                 gridSize={settings.gridSize}
@@ -323,6 +327,7 @@ export default function CombinedMode() {
                 onPrint={handlePrint}
                 clearTrigger={drawingClearTrigger}
               />
+              </div>
             </div>
           </div>
         </div>
@@ -421,7 +426,7 @@ export default function CombinedMode() {
       </div>
       <div
         ref={setHintHost}
-        className="no-print pointer-events-none absolute inset-0 z-20 col-start-1 row-start-1 col-span-2 row-span-2 flex items-center justify-center"
+        className="no-print pointer-events-none absolute inset-0 z-50 col-start-1 row-start-1 col-span-2 row-span-2 flex items-center justify-center"
       />
       <div className="pointer-events-none col-start-1 col-span-2 row-start-2 relative z-30 h-0 w-full overflow-visible">
         <div
