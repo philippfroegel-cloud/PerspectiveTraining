@@ -30,13 +30,14 @@ function shuffleInPlace<T>(items: T[]): T[] {
   return items
 }
 
-/** First launch: arrow first. Later visits: fully shuffled. Order stays fixed for this page load. */
+/** First launch: generated_06_tl first. Later visits: fully shuffled. Order stays fixed for this page load. */
 function orderShapesForSession(items: Shape[]): Shape[] {
   if (!IS_FIRST_APP_LAUNCH) return shuffleInPlace([...items])
-  const arrowIndex = items.findIndex(shape => shape.id === 'arrow')
-  if (arrowIndex < 0) return shuffleInPlace([...items])
-  const rest = items.filter((_, index) => index !== arrowIndex)
-  return [items[arrowIndex], ...shuffleInPlace(rest)]
+  const firstId = 'generated_06_tl'
+  const firstIndex = items.findIndex(shape => shape.id === firstId)
+  if (firstIndex < 0) return shuffleInPlace([...items])
+  const rest = items.filter((_, index) => index !== firstIndex)
+  return [items[firstIndex], ...shuffleInPlace(rest)]
 }
 
 export const shapes: Shape[] = orderShapesForSession(
