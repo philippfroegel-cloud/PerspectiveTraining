@@ -88,8 +88,7 @@ export function getPerspectiveParams(seed: number, aspectRatio: number): Perspec
 
   // Keep slight size variation while avoiding clipping.
   const framingPadding = 1.04 + rand() * 0.16 // 1.04..1.20
-  const zoomScale = 1.5
-  const distance = computeFitDistance(aspectRatio, fov, framingPadding) / zoomScale
+  const distance = computeFitDistance(aspectRatio, fov, 1)
 
   return { azimuthRad, elevationRad, rollRad, distance, fov, framingPadding }
 }

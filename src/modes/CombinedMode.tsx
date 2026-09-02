@@ -4,8 +4,9 @@ import FlatView from '../components/FlatView'
 import PerspectiveView from '../components/PerspectiveView'
 import DrawingCanvas from '../components/DrawingCanvas'
 import LabeledRange from '../components/LabeledRange'
-import { applyFovWheelDelta, cameraSlidersFromSeed, computeFitDistance, degreesToRadians, getPerspectiveParams, rollDegrees, roundDegrees, SLIDER_AZIMUTH_MAX_DEG, SLIDER_AZIMUTH_MIN_DEG, SLIDER_FOV_MAX_DEG, SLIDER_FOV_MIN_DEG } from '../utils/perspective'
-import { PLANE_CANVAS_SIZE, type ProjectPointerToPlane } from '../utils/planeProjection'
+import { cameraSlidersFromSeed, computeFitDistance, degreesToRadians, getPerspectiveParams, rollDegrees, roundDegrees, SLIDER_AZIMUTH_MAX_DEG, SLIDER_AZIMUTH_MIN_DEG, SLIDER_FOV_MAX_DEG, SLIDER_FOV_MIN_DEG } from '../utils/perspective'
+import { IDENTITY_VIEW_ZOOM, PLANE_CANVAS_SIZE, clientToViewNdc, isViewPanPointer, panViewByNdc, zoomViewAroundNdc, type ProjectPointerToPlane } from '../utils/planeProjection'
+import { blurFocusedRange, isRangeInput, isTextEntryTarget } from '../utils/shortcutTarget'
 
 function createDrawingSurface() {
   return document.createElement('canvas')
@@ -21,9 +22,8 @@ function Toggle({
   label: string
 }) {
   return (
-    <label className="flex items-center gap-2 cursor-pointer select-none">
+    <label className="flex items-center gap-2 cursor-pointer select-none" onClick={onToggle}>
       <div
-        onClick={onToggle}
         className={`w-9 h-[18px] rounded-full transition-colors ${on ? 'bg-amber-500' : 'bg-gray-400'}`}
       >
         <div
@@ -66,7 +66,9 @@ export default function CombinedMode() {
   const [showShapeRight, setShowShapeRight] = useState(false)
   const [showDrawingLeft, setShowDrawingLeft] = useState(true)
   const [showDrawingRight, setShowDrawingRight] = useState(true)
+  const [showDiagonals, setShowDiagonals] = useState(false)
   const [flatRotationDeg, setFlatRotationDeg] = useState(0)
+  const viewZoomRef = useRef(IDENTITY_VIEW_ZOOM)
   const [perspectiveLocks, setPerspectiveLocks] = useState({
     azimuth: false,
     elevation: false,
@@ -106,12 +108,109 @@ export default function CombinedMode() {
   useEffect(() => {
     if (!perspectiveNode) return
     const onWheel = (event: WheelEvent) => {
+      if (event.ctrlKey || event.metaKey || event.altKey) return
+      if (document.documentElement.classList.contains('drawing-stroke-active')) return
       event.preventDefault()
-      setFovDeg(current => applyFovWheelDelta(current, event.deltaY))
+      const ndc = clientToViewNdc(perspectiveNode.getBoundingClientRect(), event.clientX, event.clientY)
+      if (!ndc) return
+      const factor = Math.exp(-event.deltaY * 0.0015)
+      viewZoomRef.current = zoomViewAroundNdc(viewZoomRef.current, ndc.x, ndc.y, factor)
     }
     perspectiveNode.addEventListener('wheel', onWheel, { passive: false })
     return () => perspectiveNode.removeEventListener('wheel', onWheel)
   }, [perspectiveNode])
+
+  useEffect(() => {
+    if (!perspectiveNode) return
+    let panPointerId: number | null = null
+    let lastNdcX = 0
+    let lastNdcY = 0
+    const previousCursor = perspectiveNode.style.cursor
+
+    const endPan = (event: PointerEvent) => {
+      if (panPointerId === null || event.pointerId !== panPointerId) return
+      if (perspectiveNode.hasPointerCapture(event.pointerId)) {
+        perspectiveNode.releasePointerCapture(event.pointerId)
+      }
+      panPointerId = null
+      perspectiveNode.style.cursor = previousCursor
+    }
+
+    const onPointerDown = (event: PointerEvent) => {
+      if (!isViewPanPointer(event)) return
+      if (document.documentElement.classList.contains('drawing-stroke-active')) return
+      const ndc = clientToViewNdc(perspectiveNode.getBoundingClientRect(), event.clientX, event.clientY)
+      if (!ndc) return
+      event.preventDefault()
+      panPointerId = event.pointerId
+      lastNdcX = ndc.x
+      lastNdcY = ndc.y
+      perspectiveNode.style.cursor = 'grabbing'
+      perspectiveNode.setPointerCapture(event.pointerId)
+    }
+
+    const onPointerMove = (event: PointerEvent) => {
+      if (panPointerId === null || event.pointerId !== panPointerId) return
+      const ndc = clientToViewNdc(perspectiveNode.getBoundingClientRect(), event.clientX, event.clientY)
+      if (!ndc) return
+      const dx = ndc.x - lastNdcX
+      const dy = ndc.y - lastNdcY
+      lastNdcX = ndc.x
+      lastNdcY = ndc.y
+      viewZoomRef.current = panViewByNdc(viewZoomRef.current, dx, dy)
+    }
+
+    const onContextMenu = (event: Event) => event.preventDefault()
+
+    perspectiveNode.addEventListener('pointerdown', onPointerDown)
+    perspectiveNode.addEventListener('pointermove', onPointerMove)
+    perspectiveNode.addEventListener('pointerup', endPan)
+    perspectiveNode.addEventListener('pointercancel', endPan)
+    perspectiveNode.addEventListener('contextmenu', onContextMenu)
+    return () => {
+      perspectiveNode.removeEventListener('pointerdown', onPointerDown)
+      perspectiveNode.removeEventListener('pointermove', onPointerMove)
+      perspectiveNode.removeEventListener('pointerup', endPan)
+      perspectiveNode.removeEventListener('pointercancel', endPan)
+      perspectiveNode.removeEventListener('contextmenu', onContextMenu)
+      perspectiveNode.style.cursor = previousCursor
+    }
+  }, [perspectiveNode])
+
+  useEffect(() => {
+    const onPointerDown = (event: PointerEvent) => {
+      if (isRangeInput(event.target)) return
+      if (event.target instanceof Element && event.target.closest('input[type="range"]')) return
+      blurFocusedRange()
+    }
+    const onPointerUp = () => blurFocusedRange()
+    const onClick = () => {
+      window.setTimeout(blurFocusedRange, 0)
+    }
+    window.addEventListener('pointerdown', onPointerDown)
+    window.addEventListener('pointerup', onPointerUp)
+    window.addEventListener('click', onClick)
+    return () => {
+      window.removeEventListener('pointerdown', onPointerDown)
+      window.removeEventListener('pointerup', onPointerUp)
+      window.removeEventListener('click', onClick)
+    }
+  }, [])
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+      if (event.ctrlKey || event.metaKey || event.altKey) return
+      if (isTextEntryTarget(event.target)) return
+      if (document.documentElement.classList.contains('drawing-stroke-active')) return
+      event.preventDefault()
+      blurFocusedRange()
+      const delta = event.key === 'ArrowRight' ? 1 : -1
+      setGridSize(Math.min(8, Math.max(1, settings.gridSize + delta)))
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [settings.gridSize, setGridSize])
 
   const aspectForFraming =
     perspectiveSize.width > 0 && perspectiveSize.height > 0
@@ -127,6 +226,7 @@ export default function CombinedMode() {
     if (!locks.spin) setRollRad(randomBase.rollRad)
     if (!locks.fov) setFovDeg(Math.round(randomBase.fov))
     setFramingPadding(randomBase.framingPadding)
+    viewZoomRef.current = IDENTITY_VIEW_ZOOM
   }, [settings.orientationSeed])
 
   const capturePerspectiveSnapshot = (): string | null => {
@@ -165,8 +265,7 @@ export default function CombinedMode() {
   }
 
   const currentPerspective = useMemo(() => {
-    const zoomScale = 1.5
-    const distance = computeFitDistance(aspectForFraming, fovDeg, framingPadding) / zoomScale
+    const distance = computeFitDistance(aspectForFraming, fovDeg, 1)
     return {
       azimuthRad: (azimuthDeg * Math.PI) / 180,
       elevationRad: (elevationDeg * Math.PI) / 180,
@@ -211,8 +310,14 @@ export default function CombinedMode() {
                 onToggle={() => setShowDrawingLeft(value => !value)}
                 label="Show drawing"
               />
+              <Toggle
+                on={showDiagonals}
+                onToggle={() => setShowDiagonals(value => !value)}
+                label="Show diagonals"
+              />
             </div>
-            <label
+            <div
+              title="←/→ to change grid size"
               style={{
                 display: 'grid',
                 gridTemplateColumns: 'minmax(0, 1fr) auto',
@@ -265,7 +370,7 @@ export default function CombinedMode() {
                   ['--range-progress' as string]: `${((settings.gridSize - 1) / 7) * 100}%`,
                 }}
               />
-            </label>
+            </div>
           </div>
       </div>
       <div className="col-start-1 row-start-2 flex min-h-0 flex-col overflow-hidden rounded-b-xl border border-t-0 border-gray-200 bg-white px-3 pt-1 pb-2">
@@ -306,6 +411,7 @@ export default function CombinedMode() {
                 shape={currentShape}
                 gridSize={settings.gridSize}
                 showShape={showShapeLeft}
+                showDiagonals={showDiagonals}
                 shapePose={settings.shapePose}
               />
               <DrawingCanvas
@@ -411,6 +517,8 @@ export default function CombinedMode() {
             drawingCanvas={drawingSurface}
             projectPointerRef={projectPointerRef}
             showDrawing={showDrawingRight}
+            showDiagonals={showDiagonals}
+            viewZoomRef={viewZoomRef}
           />
           <div
             ref={setPlanePointerHost}

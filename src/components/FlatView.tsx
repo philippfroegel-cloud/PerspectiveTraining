@@ -1,11 +1,13 @@
 import { useId } from 'react'
 import { shapes, type Shape } from '../shapes/shapes'
 import { IDENTITY_SHAPE_POSE, type ShapePose } from '../utils/shapePose'
+import { cellDiagonalUvSegments, gridDiagonalColorCss, orientationMarkColorCss, orientationMarkUvCorners } from '../utils/planeProjection'
 
 interface Props {
   shape?: Shape
   gridSize: number
   showShape?: boolean
+  showDiagonals?: boolean
   gridOnly?: boolean
   shapePose?: ShapePose
 }
@@ -14,6 +16,7 @@ export default function FlatView({
   shape,
   gridSize,
   showShape = false,
+  showDiagonals = false,
   gridOnly = false,
   shapePose = IDENTITY_SHAPE_POSE,
 }: Props) {
@@ -82,17 +85,31 @@ export default function FlatView({
           })}
         </g>
         {gridLines}
+        {showDiagonals &&
+          cellDiagonalUvSegments(gridSize).map(({ a, b }, index) => (
+            <line
+              key={`d-${index}`}
+              x1={gridOrigin + a.u * gridSpan}
+              y1={gridOrigin + (1 - a.v) * gridSpan}
+              x2={gridOrigin + b.u * gridSpan}
+              y2={gridOrigin + (1 - b.v) * gridSpan}
+              stroke={gridDiagonalColorCss()}
+              strokeWidth={0.6}
+            />
+          ))}
         <line
           x1={gridOrigin}
           y1={gridEnd}
           x2={gridEnd}
           y2={gridEnd}
-          stroke="#4b5563"
+          stroke={orientationMarkColorCss()}
           strokeWidth={2.5}
         />
         <polygon
-          points={`${gridOrigin + 8},${gridEnd - 8} ${gridOrigin + 28},${gridEnd - 8} ${gridOrigin + 8},${gridEnd - 28}`}
-          fill="#4b5563"
+          points={orientationMarkUvCorners()
+            .map(({ u, v }) => `${gridOrigin + u * gridSpan},${gridOrigin + (1 - v) * gridSpan}`)
+            .join(' ')}
+          fill={orientationMarkColorCss()}
         />
       </svg>
     </div>

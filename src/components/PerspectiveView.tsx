@@ -1,7 +1,7 @@
 import { useEffect, useRef, type MutableRefObject } from 'react'
 import * as THREE from 'three'
 import type { PerspectiveParams } from '../utils/perspective'
-import { applyCamera, applySheetSpin, projectPointerWithCamera, type ProjectPointerToPlane } from '../utils/planeProjection'
+import { applyCamera, applySheetSpin, cellDiagonalUvSegments, GRID_DIAGONAL_COLOR, ORIENTATION_MARK, PLANE_HALF_SIZE, PLANE_SIZE, orientationMarkUvCorners, paperUvToLocal, projectPointerWithCamera, type ProjectPointerToPlane, type ViewZoom } from '../utils/planeProjection'
 import { acquireShapeTexture, getCachedShapeTexture } from '../utils/shapeTextures'
 import { IDENTITY_SHAPE_POSE, SHAPE_POSE_CANVAS_SIZE, drawPosedShape, type ShapePose } from '../utils/shapePose'
 
@@ -14,6 +14,8 @@ interface Props {
   drawingCanvas?: HTMLCanvasElement | null
   projectPointerRef?: MutableRefObject<ProjectPointerToPlane | null>
   showDrawing?: boolean
+  showDiagonals?: boolean
+  viewZoomRef: MutableRefObject<ViewZoom>
 }
 
 type SceneContext = {
@@ -34,7 +36,7 @@ type SceneContext = {
   animId: number
 }
 
-const shapePlaneGeometry = new THREE.PlaneGeometry(4, 4)
+const shapePlaneGeometry = new THREE.PlaneGeometry(PLANE_SIZE, PLANE_SIZE)
 
 function disposeOverlayMesh(mesh: THREE.Mesh | null) {
   if (!mesh) return
@@ -61,12 +63,11 @@ function disposeGroup(group: THREE.Group) {
   group.clear()
 }
 
-function buildGridGroup(gridSize: number): THREE.Group {
+function buildGridGroup(gridSize: number, showDiagonals: boolean): THREE.Group {
   const group = new THREE.Group()
 
-  const halfSize = 2
-  const fullSize = halfSize * 2
-  const step = fullSize / gridSize
+  const halfSize = PLANE_HALF_SIZE
+  const step = PLANE_SIZE / gridSize
   const linePositions: number[] = []
   for (let i = 0; i <= gridSize; i++) {
     const t = -halfSize + i * step
@@ -78,29 +79,48 @@ function buildGridGroup(gridSize: number): THREE.Group {
   gridGeo.setAttribute('position', new THREE.Float32BufferAttribute(linePositions, 3))
   group.add(new THREE.LineSegments(gridGeo, new THREE.LineBasicMaterial({ color: 0x9ca3af })))
 
-  const borderGeo = new THREE.EdgesGeometry(new THREE.PlaneGeometry(4, 4, 1, 1))
+  const borderGeo = new THREE.EdgesGeometry(new THREE.PlaneGeometry(PLANE_SIZE, PLANE_SIZE, 1, 1))
   group.add(new THREE.LineSegments(borderGeo, new THREE.LineBasicMaterial({ color: 0x6b7280, linewidth: 2 })))
 
   const bottomEdgeGeo = new THREE.BufferGeometry().setFromPoints([
-    new THREE.Vector3(-2, -2, 0.002),
-    new THREE.Vector3(2, -2, 0.002),
+    new THREE.Vector3(-halfSize, -halfSize, 0.002),
+    new THREE.Vector3(halfSize, -halfSize, 0.002),
   ])
-  group.add(new THREE.Line(bottomEdgeGeo, new THREE.LineBasicMaterial({ color: 0x374151 })))
+  group.add(new THREE.Line(bottomEdgeGeo, new THREE.LineBasicMaterial({ color: ORIENTATION_MARK.color })))
 
+  const markZ = 0.002
   const markerGeo = new THREE.BufferGeometry()
   markerGeo.setAttribute(
     'position',
-    new THREE.Float32BufferAttribute([
-      -1.92, -1.92, 0.002,
-      -1.62, -1.92, 0.002,
-      -1.92, -1.62, 0.002,
-    ], 3)
+    new THREE.Float32BufferAttribute(
+      orientationMarkUvCorners().flatMap(({ u, v }) => {
+        const { x, y } = paperUvToLocal(u, v)
+        return [x, y, markZ]
+      }),
+      3,
+    ),
   )
   markerGeo.setIndex([0, 1, 2])
-  group.add(new THREE.Mesh(markerGeo, new THREE.MeshBasicMaterial({ color: 0x374151, side: THREE.DoubleSide })))
+  group.add(new THREE.Mesh(markerGeo, new THREE.MeshBasicMaterial({ color: ORIENTATION_MARK.color, side: THREE.DoubleSide })))
+
+  const diagPositions: number[] = []
+  for (const { a, b } of cellDiagonalUvSegments(gridSize)) {
+    const start = paperUvToLocal(a.u, a.v)
+    const end = paperUvToLocal(b.u, b.v)
+    diagPositions.push(start.x, start.y, 0, end.x, end.y, 0)
+  }
+  const diagGeo = new THREE.BufferGeometry()
+  diagGeo.setAttribute('position', new THREE.Float32BufferAttribute(diagPositions, 3))
+  const diagLines = new THREE.LineSegments(
+    diagGeo,
+    new THREE.LineBasicMaterial({ color: GRID_DIAGONAL_COLOR }),
+  )
+  diagLines.name = 'grid-diagonals'
+  diagLines.visible = showDiagonals
+  group.add(diagLines)
 
   const fillMesh = new THREE.Mesh(
-    new THREE.PlaneGeometry(4, 4),
+    new THREE.PlaneGeometry(PLANE_SIZE, PLANE_SIZE),
     new THREE.MeshBasicMaterial({ color: 0xfafafa, side: THREE.DoubleSide })
   )
   fillMesh.position.z = -0.001
@@ -232,7 +252,7 @@ function syncDrawingOverlay(ctx: SceneContext, sourceCanvas: HTMLCanvasElement) 
          diffuseColor.a = 1.0;`,
       )
     }
-    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(4, 4), overlayMat)
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(PLANE_SIZE, PLANE_SIZE), overlayMat)
     mesh.position.z = 0.002
     ctx.sheetGroup.add(mesh)
     ctx.drawingOverlayMesh = mesh
@@ -252,6 +272,8 @@ export default function PerspectiveView({
   drawingCanvas = null,
   projectPointerRef,
   showDrawing = true,
+  showDiagonals = false,
+  viewZoomRef,
 }: Props) {
   const mountRef = useRef<HTMLDivElement>(null)
   const ctxRef = useRef<SceneContext | null>(null)
@@ -279,13 +301,13 @@ export default function PerspectiveView({
     renderer.setPixelRatio(window.devicePixelRatio)
 
     const sheetGroup = new THREE.Group()
-    const gridGroup = buildGridGroup(gridSize)
+    const gridGroup = buildGridGroup(gridSize, showDiagonals)
     sheetGroup.add(gridGroup)
     scene.add(sheetGroup)
     scene.add(new THREE.AmbientLight(0xffffff, 0.5))
 
     const hitMesh = new THREE.Mesh(
-      new THREE.PlaneGeometry(4, 4),
+      new THREE.PlaneGeometry(PLANE_SIZE, PLANE_SIZE),
       new THREE.MeshBasicMaterial({ visible: false, side: THREE.DoubleSide }),
     )
     sheetGroup.add(hitMesh)
@@ -300,7 +322,7 @@ export default function PerspectiveView({
       const w = mount.clientWidth
       const h = mount.clientHeight
       if (w <= 0 || h <= 0) return
-      applyCamera(camera, perspectiveRef.current, w / h)
+      applyCamera(camera, perspectiveRef.current, w / h, viewZoomRef.current)
       applySheetSpin(sheetGroup, perspectiveRef.current.rollRad)
       renderer.setPixelRatio(window.devicePixelRatio)
       renderer.setSize(w, h)
@@ -312,7 +334,8 @@ export default function PerspectiveView({
       perspective,
       mount.clientWidth > 0 && mount.clientHeight > 0
         ? mount.clientWidth / mount.clientHeight
-        : 1
+        : 1,
+      viewZoomRef.current,
     )
 
     mount.appendChild(renderer.domElement)
@@ -338,6 +361,12 @@ export default function PerspectiveView({
 
     const render = () => {
       ctx.animId = requestAnimationFrame(render)
+      const w = mount.clientWidth
+      const h = mount.clientHeight
+      if (w > 0 && h > 0) {
+        applyCamera(camera, perspectiveRef.current, w / h, viewZoomRef.current)
+        applySheetSpin(sheetGroup, perspectiveRef.current.rollRad)
+      }
       const canvas = drawingCanvasRef.current
       if (canvas && canvas.width > 0 && canvas.height > 0) {
         syncDrawingOverlay(ctx, canvas)
@@ -379,21 +408,16 @@ export default function PerspectiveView({
   useEffect(() => {
     const ctx = ctxRef.current
     if (!ctx) return
-    const w = ctx.mount.clientWidth
-    const h = ctx.mount.clientHeight
-    const aspect = w > 0 && h > 0 ? w / h : 1
-    applyCamera(ctx.camera, perspective, aspect)
-    applySheetSpin(ctx.sheetGroup, perspective.rollRad)
-  }, [perspective])
-
-  useEffect(() => {
-    const ctx = ctxRef.current
-    if (!ctx) return
     ctx.sheetGroup.remove(ctx.gridGroup)
     disposeGroup(ctx.gridGroup)
-    ctx.gridGroup = buildGridGroup(gridSize)
+    ctx.gridGroup = buildGridGroup(gridSize, showDiagonals)
     ctx.sheetGroup.add(ctx.gridGroup)
   }, [gridSize])
+
+  useEffect(() => {
+    const diagonals = ctxRef.current?.gridGroup.getObjectByName('grid-diagonals')
+    if (diagonals) diagonals.visible = showDiagonals
+  }, [showDiagonals])
 
   useEffect(() => {
     const ctx = ctxRef.current

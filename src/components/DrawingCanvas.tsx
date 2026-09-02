@@ -1,6 +1,7 @@
 import { forwardRef, useEffect, useRef, useState, type ReactNode, type Ref, type MutableRefObject } from 'react'
 import { createPortal } from 'react-dom'
 import type { ProjectPointerToPlane } from '../utils/planeProjection'
+import { blurFocusedRange, isTextEntryTarget } from '../utils/shortcutTarget'
 
 type PointerSpace = 'screen' | 'plane'
 
@@ -123,6 +124,7 @@ interface Props {
   /** Clockwise display rotation of the 2D paper; canvas bitmap stays unrotated. */
   displayRotationDeg?: number
 }
+
 
 function ToolGlyph({ children }: { children: ReactNode }) {
   return (
@@ -346,6 +348,7 @@ const DrawingCanvas = forwardRef<HTMLCanvasElement, Props>(function DrawingCanva
     }
 
     const isPrimaryPointer = (event: PointerEvent) => {
+      if (event.ctrlKey || event.metaKey) return false
       if (event.pointerType === 'mouse') return event.button === 0
       return true
     }
@@ -701,9 +704,24 @@ const DrawingCanvas = forwardRef<HTMLCanvasElement, Props>(function DrawingCanva
   useEffect(() => {
     if (!enabled) return
     const onKeyDown = (event: KeyboardEvent) => {
-      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'z' || event.shiftKey) return
-      event.preventDefault()
-      undoLastStroke()
+      if (isTextEntryTarget(event.target)) return
+      const key = event.key.toLowerCase()
+      if ((event.ctrlKey || event.metaKey) && key === 'z' && !event.shiftKey) {
+        event.preventDefault()
+        undoLastStroke()
+        return
+      }
+      if (event.ctrlKey || event.metaKey || event.altKey || event.repeat) return
+      if (drawingRef.current) return
+      if (event.code === 'KeyE' || key === 'e') {
+        event.preventDefault()
+        blurFocusedRange()
+        setEraserMode(true)
+      } else if (event.code === 'KeyD' || key === 'd') {
+        event.preventDefault()
+        blurFocusedRange()
+        setEraserMode(false)
+      }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
@@ -724,7 +742,7 @@ const DrawingCanvas = forwardRef<HTMLCanvasElement, Props>(function DrawingCanva
         >
           <button
             type="button"
-            title={eraserMode ? 'Pen' : 'Eraser'}
+            title={eraserMode ? 'Pen (D)' : 'Eraser (E)'}
             onClick={() => setEraserMode(v => !v)}
             className={`${iconBtn} ${eraserMode ? 'bg-gray-200 text-gray-800' : ''}`}
           >
